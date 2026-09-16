@@ -25,4 +25,4 @@ Decisions to make (and record, once made) while executing the [take-home exercis
 - [x] Scheduler: Soperator (Slurm) vs. Kubernetes — going with **plain Kubernetes-native scheduling**. Wanted to explore Soperator, but it requires a GPU capacity *reservation* (not just quota) that isn't currently available — asked Nebius for clarification, may revisit.
 - [ ] Storage split across the 2TB network disk vs. 2TB shared filesystem — to be defined later.
 - [ ] Use the **vLLM** turnkey Application, or a custom-built inference server, for Option 2 — needs further exploration before deciding.
-- [x] Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces).
+- [x] Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces): native Monitoring (PromQL) + Logging (LogQL), fed by the Nebius Observability Agent for Kubernetes, visualized in Grafana. See [docs/observability.md](docs/observability.md).
