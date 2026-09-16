@@ -95,22 +95,32 @@ hasn't been applied against the live project yet (see `infra/README.md`).
 
 To use it, set `UPLOAD_LOGS_BUCKET` (and optionally `UPLOAD_LOGS_ENDPOINT` /
 `UPLOAD_LOGS_PREFIX`) plus S3 credentials with write access to the bucket.
-Create a Nebius IAM (AWS-compatible) access key for a service account and
-wire it in as a Kubernetes Secret, similar to the registry pull-secret
-pattern above:
+Create a Nebius IAM (AWS-compatible) access key for a service account,
+delivered straight into SecretStash (Nebius's secrets-management service —
+CLI/API name `mysterybox`) so the secret value never touches your terminal
+or shell history, then wire it into a Kubernetes Secret, similar to the
+registry pull-secret pattern above:
 
 ```bash
 nebius iam v2 access-key create \
   --parent-id <project-id> --account-service-account-id <service-account-id> \
-  --description "cluster-validator logs upload" --secret-delivery-mode inline
-# note the returned aws_access_key_id + secret (use `get-secret --id <key-id>`
-# if the secret wasn't shown inline), then:
+  --description "cluster-validator logs upload" --secret-delivery-mode mystery_box
+# note metadata.id (the access key's own ID) and status.aws_access_key_id
+# from the output - both non-secret. status.secret_reference_id is the
+# SecretStash secret holding the actual secret value (never printed).
+
 kubectl create secret generic cluster-validator-logs-creds \
-  --from-literal=AWS_ACCESS_KEY_ID=<aws_access_key_id> \
-  --from-literal=AWS_SECRET_ACCESS_KEY=<secret>
+  --from-literal=AWS_ACCESS_KEY_ID=<status.aws_access_key_id> \
+  --from-literal=AWS_SECRET_ACCESS_KEY="$(nebius mysterybox payload get-by-key --secret-id <status.secret_reference_id> --key secret)"
 # then reference both keys via `envFrom: [{secretRef: {name: cluster-validator-logs-creds}}]`
 # in the Job's pod spec, alongside UPLOAD_LOGS_BUCKET=<cluster_name>-logs.
 ```
+
+Because the secret lives in SecretStash (not just a one-time CLI printout),
+rebuilding the cluster or the Kubernetes Secret later is a matter of
+re-running the `kubectl create secret` step above with the same
+`--secret-id` — no need to regenerate the access key or have ever seen the
+plaintext value.
 
 The upload is best-effort: a failure logs a warning but doesn't change the
 overall validation exit code (see `upload_logs.py`/`upload_logs.sh`).

@@ -75,7 +75,7 @@ A reference list of Nebius platform services, grouped by category, with notes on
 
 ## Security and cryptography
 
-- Key Management Service, SecretStash (secrets storage) — relevant if the PoC needs to store credentials/tokens (e.g. model registry access, API keys) securely.
+- Key Management Service, SecretStash (secrets storage, CLI/API identifier `mysterybox`) — used in practice for the cluster-validator's Object Storage upload credential (see [`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)): `nebius iam v2 access-key create --secret-delivery-mode mystery_box` delivers the generated secret straight into a SecretStash secret, retrievable later via `nebius mysterybox payload get-by-key`.
 
 
 
