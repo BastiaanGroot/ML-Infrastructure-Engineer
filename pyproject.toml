@@ -1,0 +1,9 @@
+[project]
+name = "ml-infrastructure-engineer"
+version = "0.1.0"
+description = "Nebius ML Infrastructure Engineer take-home: cluster validation tooling and design docs."
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = false
