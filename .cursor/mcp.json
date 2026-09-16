@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "nebius": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "nebius-mcp-server",
+        "nebius-mcp-server@git+https://github.com/nebius/mcp-server@main"
+      ],
+      "env": {
+        "SAFE_MODE": "true"
+      }
+    }
+  }
+}

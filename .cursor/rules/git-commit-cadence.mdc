@@ -1,0 +1,17 @@
+---
+description: Commit (and push, with confirmation) at logical implementation checkpoints
+alwaysApply: true
+---
+
+# Commit Cadence
+
+- After completing a logical unit of work (a feature, fix, or self-contained
+  set of file changes), stage and commit it with a clear, descriptive message
+  rather than letting unrelated changes pile up in one big commit.
+- Prefer several small, focused commits over one large commit.
+- Follow the user's existing git rules for pushing:
+  - Never push directly to `main` without explicit confirmation.
+  - If currently on `main`, stop and ask for confirmation before any push,
+    even if the user already asked to push.
+  - Otherwise, ask before pushing a commit unless the user has specifically
+    asked to push.
