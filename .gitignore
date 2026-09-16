@@ -12,3 +12,10 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Environment-specific values (may include personal SSH keys, existing
+# resource IDs) - never committed. *.tfvars.example IS committed as a
+# template.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example

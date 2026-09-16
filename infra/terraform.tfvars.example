@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars (gitignored, never committed) and fill in for
+# your environment. All variables here are optional - see variables.tf for
+# defaults if left unset.
+
+project_id = "project-xxxxxxxxxxxxxxxxxxxxxx"
+
+# Adopting an already-existing GPU node group (e.g. after `terraform
+# import`)? Set these to match it so `terraform plan` doesn't try to strip
+# SSH access / unmount a filesystem / detach a security group.
+# node_group_ssh_public_key     = "ssh-ed25519 AAAA... you@example.com"
+# node_group_ssh_user           = "ubuntu"
+# node_group_filesystem_id      = "computefilesystem-xxxxxxxxxxxxxxxxxxxxxx"
+# node_group_filesystem_mount_path = "/mnt/shared"
+# node_group_filesystem_mount_tag  = "filesystem-0"
+# node_group_security_group_ids = ["vpcsecuritygroup-xxxxxxxxxxxxxxxxxxxxxx"]

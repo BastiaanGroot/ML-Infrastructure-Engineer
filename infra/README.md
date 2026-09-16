@@ -7,10 +7,12 @@ Storage bucket for run logs (`summary.json` etc. — see
 [`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)).
 
 This is meant for standing up a **fresh** environment (e.g. so the client can
-recreate the setup themselves) — it does not manage or import the ad hoc test
-cluster created by hand during this PoC. Extend it here as the project grows
-(storage, training/inference workloads, observability agent via the
-`helm`/`kubernetes` Terraform providers, etc.).
+recreate the setup themselves). The hand-built PoC cluster has since been
+`terraform import`-ed into local state for verification (state stays
+local/gitignored, never committed) — see `misc/project-status.md` for
+details. Extend it here as the project grows (storage, training/inference
+workloads, observability agent via the `helm`/`kubernetes` Terraform
+providers, etc.).
 
 ## Usage
 
@@ -27,6 +29,11 @@ cluster created by hand during this PoC. Extend it here as the project grows
    (`1gpu-16vcpu-200gb`) reflects what was actually available during this
    PoC — an 8-GPU preset may be capacity-constrained (see the README's
    Design Choices section).
+4. Optional GPU node SSH access / shared filesystem mount / extra security
+   group — not secrets (an SSH key here is a *public* key), but
+   environment-specific, so unset by default. Copy
+   [`terraform.tfvars.example`](terraform.tfvars.example) to `terraform.tfvars`
+   (gitignored) and fill in to enable them.
 
 Always run `terraform plan` and review the diff before `apply`, especially
 against a project that already has resources.

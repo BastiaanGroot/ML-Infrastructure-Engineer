@@ -38,3 +38,48 @@ variable "gpu_node_count" {
   type        = number
   default     = 2
 }
+
+# The three variables below are all optional and environment-specific (not
+# secrets - an SSH key here is a *public* key, and the other two are just
+# resource IDs - but not meaningful defaults for a fresh deployment either).
+# Left unset, node groups come up with no SSH access, no extra filesystem
+# mount, and no extra security group, same as before these were added. Set
+# them via a local, gitignored terraform.tfvars (see terraform.tfvars.example)
+# to adopt an already-existing node group's config, e.g. after `terraform
+# import`.
+
+variable "node_group_ssh_public_key" {
+  description = "Optional SSH public key to grant access to GPU nodes via cloud-init. Also used as the cloud-init trigger: if unset, no cloud-init user-data is set at all (no filesystem mount script either)."
+  type        = string
+  default     = null
+}
+
+variable "node_group_ssh_user" {
+  description = "Username for node_group_ssh_public_key's cloud-init user. Only used if node_group_ssh_public_key is set."
+  type        = string
+  default     = "ubuntu"
+}
+
+variable "node_group_filesystem_id" {
+  description = "Optional existing Nebius Shared Filesystem ID to mount on GPU nodes (e.g. for shared checkpoints/data). Only mounted if node_group_ssh_public_key is also set, since the mount happens via the same cloud-init runcmd."
+  type        = string
+  default     = null
+}
+
+variable "node_group_filesystem_mount_path" {
+  description = "Mount path inside GPU nodes for node_group_filesystem_id."
+  type        = string
+  default     = "/mnt/shared"
+}
+
+variable "node_group_filesystem_mount_tag" {
+  description = "Mount tag (virtiofs device tag) for node_group_filesystem_id. Must match between the node group's filesystems block and the cloud-init mount command, which this variable drives for both."
+  type        = string
+  default     = "filesystem-0"
+}
+
+variable "node_group_security_group_ids" {
+  description = "Optional additional VPC security group IDs to attach to GPU node network interfaces."
+  type        = list(string)
+  default     = []
+}
