@@ -1,8 +1,10 @@
 # infra
 
 Terraform to reproduce the PoC infrastructure from scratch in a Nebius
-project: VPC network + subnet, an mk8s cluster, one GPU node group, and a
-container registry for `cluster-validator` (and other) images.
+project: VPC network + subnet, an mk8s cluster, one GPU node group, a
+container registry for `cluster-validator` (and other) images, and an Object
+Storage bucket for run logs (`summary.json` etc. — see
+[`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)).
 
 This is meant for standing up a **fresh** environment (e.g. so the client can
 recreate the setup themselves) — it does not manage or import the ad hoc test

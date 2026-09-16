@@ -14,3 +14,8 @@ output "network_id" {
 output "subnet_id" {
   value = nebius_vpc_v1_subnet.main.id
 }
+
+output "logs_bucket_name" {
+  description = "Object Storage bucket name for cluster-validator/job logs (UPLOAD_LOGS_BUCKET)."
+  value       = nebius_storage_v1_bucket.logs.name
+}

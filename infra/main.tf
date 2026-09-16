@@ -67,3 +67,15 @@ resource "nebius_registry_v1_registry" "cluster_validator" {
   name        = "cluster-validator"
   description = "Images for the cluster-validator GPU/NCCL/storage validation container."
 }
+
+# Object Storage bucket for cluster-validator run logs (summary.json), and
+# any other job logs we later want to keep past Nebius Logging's 14-day
+# retention. See cluster-validator/README.md for the UPLOAD_LOGS_* env vars
+# and credentials needed to actually upload into this bucket from a Job.
+resource "nebius_storage_v1_bucket" "logs" {
+  parent_id = var.project_id
+  name      = "${var.cluster_name}-logs"
+
+  default_storage_class = "STANDARD"
+  versioning_policy     = "DISABLED"
+}
