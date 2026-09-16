@@ -1,0 +1,76 @@
+{
+  "title": "cluster-validator",
+  "uid": "cluster-validator",
+  "tags": ["cluster-validator", "nebius"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "P65CA746CF0DD005A" },
+        "query": "label_values(DCGM_FI_DEV_GPU_TEMP, instance)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "GPU temperature (°C)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "P65CA746CF0DD005A" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"$node\"}",
+          "legendFormat": "{{instance}} gpu {{uuid}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "GPU utilization (%)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "P65CA746CF0DD005A" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_GPU_UTIL{instance=~\"$node\"}",
+          "legendFormat": "{{instance}} gpu {{uuid}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "GPU power usage (W)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "P65CA746CF0DD005A" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_POWER_USAGE{instance=~\"$node\"}",
+          "legendFormat": "{{instance}} gpu {{uuid}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "cluster-validator logs (incl. NCCL / storage bench output)",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "PF8A5D721989A1ADC" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "{__bucket__=\"default\", k8s_job_name=\"cluster-validator\", k8s_node_name=~\"$node\"}"
+        }
+      ]
+    }
+  ]
+}

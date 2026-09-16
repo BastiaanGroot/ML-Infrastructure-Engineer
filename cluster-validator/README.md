@@ -74,6 +74,20 @@ All checks are controlled via environment variables (see comments at the top of 
 | `FIO_SIZE` / `FIO_RUNTIME` | `1G` / `20` | fio test file size / duration per path |
 | `FIO_MIN_THROUGHPUT_MBPS` | unset | Optional minimum read+write throughput |
 
+## Grafana dashboard
+
+[`grafana/cluster-validator-dashboard.json`](grafana/cluster-validator-dashboard.json)
+combines GPU temp/utilization/power (from Nebius Monitoring, via the
+[Nebius Observability Agent](../docs/observability.md)) with `cluster-validator`
+logs (from Nebius Logging) on one screen, filterable by node. Import it into
+the cluster's Grafana:
+
+```bash
+curl -u admin:<password> -X POST -H "Content-Type: application/json" \
+  -d "{\"dashboard\": $(cat grafana/cluster-validator-dashboard.json), \"overwrite\": true}" \
+  http://<grafana-host>/api/dashboards/db
+```
+
 ## Output
 
 Each check writes a JSON result to `$RESULTS_DIR/<check>.json` (default
