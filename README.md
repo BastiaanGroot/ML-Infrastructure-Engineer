@@ -27,3 +27,15 @@ Decisions to make (and record, once made) while executing the [take-home exercis
 - [ ] Storage split across the 2TB network disk vs. 2TB shared filesystem — to be defined later.
 - [ ] Use the **vLLM** turnkey Application, or a custom-built inference server, for Option 2 — needs further exploration before deciding.
 - [x] Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces): native Monitoring (PromQL) + Logging (LogQL), fed by the Nebius Observability Agent for Kubernetes, visualized in Grafana. See [docs/observability.md](docs/observability.md).
+- [x] Run logs (e.g. `summary.json`) — optionally uploaded to a Nebius **Object Storage** bucket for retention past Logging's 14-day default. IaC only for now (bucket defined in [infra/main.tf](infra/main.tf), not yet applied); see [cluster-validator/README.md](cluster-validator/README.md#uploading-logs-to-object-storage).
+
+## Future work
+
+- **2x8-GPU switch**: the current test cluster runs 2 nodes x 1 GPU each (see
+  the "Known open items" gap in [`misc/project-status.md`](misc/project-status.md))
+  — once the 8-GPU-per-node capacity constraint is resolved, the plan is to
+  move to 2 nodes x 8 GPUs (16 GPUs total, matching the PoC spec), using the
+  `8gpu-128vcpu-1600gb` preset confirmed by the Nebius Solutions Library's
+  [`k8s-training`](https://github.com/nebius/nebius-solutions-library/tree/main/k8s-training)
+  module. `cluster-validator/k8s/job-nccl-multinode.yaml` is already written
+  for this target.
