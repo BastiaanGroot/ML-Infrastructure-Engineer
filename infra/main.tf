@@ -2,10 +2,20 @@
 # network + subnet, an mk8s cluster, one GPU node group, and a container
 # registry for the cluster-validator (and any other) images.
 #
-# This is meant to stand up a fresh environment (e.g. for the client to
-# recreate the setup) — it does NOT manage the ad hoc test cluster we
-# created by hand during this PoC. Run `terraform plan` and review before
-# ever applying against a project that already has resources.
+# The hand-built PoC cluster (created via the Nebius console wizard) has
+# since been imported into local state for verification (`terraform import`,
+# not committed — state stays local/gitignored). Values below (etcd size,
+# k8s version, boot disk, GPU driver/OS) were reconciled to match it, since
+# those are sensible defaults for any deployment. Three things are
+# deliberately NOT templated here, since they're specific to that one
+# environment (a personal SSH key, an existing shared filesystem ID, and a
+# security group ID) — `terraform plan` against the imported state will
+# keep showing those as pending removals until someone adds them back
+# explicitly. Do not `apply` against that state without addressing them
+# first (also note the console wizard gave the network/subnet/node group
+# auto-generated names, e.g. "default-network"; the safe rename in this
+# config to consistent names would show as a plan diff too, but is not
+# destructive on its own).
 
 resource "nebius_vpc_v1_network" "main" {
   parent_id = var.project_id
@@ -20,6 +30,9 @@ resource "nebius_vpc_v1_subnet" "main" {
   ipv4_private_pools = {
     use_network_pools = true
   }
+  ipv4_public_pools = {
+    use_network_pools = true
+  }
 }
 
 resource "nebius_mk8s_v1_cluster" "main" {
@@ -29,7 +42,8 @@ resource "nebius_mk8s_v1_cluster" "main" {
   control_plane = {
     subnet_id         = nebius_vpc_v1_subnet.main.id
     version           = var.k8s_version
-    etcd_cluster_size = 1 # single control-plane instance is enough for a PoC; use 3 for HA
+    etcd_cluster_size = 3 # HA (3 control-plane instances); use 1 to save cost for a disposable PoC
+    audit_logs        = {} # push k8s audit logs to Nebius Logging
     endpoints = {
       public_endpoint = {}
     }
@@ -49,9 +63,15 @@ resource "nebius_mk8s_v1_node_group" "gpu" {
     }
 
     boot_disk = {
-      type           = "NETWORK_SSD"
-      size_gibibytes = 128
+      type             = "NETWORK_SSD"
+      size_gibibytes   = 279
+      block_size_bytes = 4096
     }
+
+    gpu_settings = {
+      drivers_preset = "cuda13.0"
+    }
+    os = "ubuntu24.04"
 
     network_interfaces = [
       {

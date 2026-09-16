@@ -18,7 +18,7 @@ variable "cluster_name" {
 variable "k8s_version" {
   description = "Kubernetes version for the mk8s cluster."
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 variable "gpu_platform" {
