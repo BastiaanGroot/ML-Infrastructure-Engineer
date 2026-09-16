@@ -1,0 +1,54 @@
+# Multi-node InfiniBand NCCL check: 2 nodes x 8 GPUs = 16 GPUs total,
+# matching the PoC capacity. Requires the MPI Operator to be installed on
+# the cluster (https://github.com/kubeflow/mpi-operator).
+#
+# This bypasses our image's default entrypoint (run.sh) and instead invokes
+# the bundled all_reduce_perf binary directly via mpirun, following the same
+# pattern as Nebius's own docs:
+# https://docs.nebius.com/kubernetes/gpu/nccl-test
+#
+# Adjust image, GPU counts (slotsPerWorker / nvidia.com/gpu), and NCCL/UCX
+# network device names to match your actual node group + fabric.
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: cluster-validator-nccl-multinode
+  namespace: default
+spec:
+  slotsPerWorker: 8
+  runPolicy:
+    cleanPodPolicy: Running
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - name: nccl-launcher
+              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:test
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  mpirun -np 16 -bind-to none -x LD_LIBRARY_PATH \
+                    -x NCCL_DEBUG=INFO -x NCCL_SOCKET_IFNAME=eth0 \
+                    -mca coll ^hcoll \
+                    -x UCX_NET_DEVICES=eth0 \
+                    -x NCCL_IB_HCA=mlx5 \
+                    -x NCCL_COLLNET_ENABLE=0 \
+                    all_reduce_perf -b 512M -e 8G -f 2 -g 1
+              env:
+                - name: OMPI_ALLOW_RUN_AS_ROOT
+                  value: "1"
+                - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+                  value: "1"
+    Worker:
+      replicas: 2
+      template:
+        spec:
+          containers:
+            - name: nccl-worker
+              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:test
+              resources:
+                limits:
+                  nvidia.com/gpu: 8
