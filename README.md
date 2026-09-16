@@ -1,13 +1,14 @@
-# ML-Infrastructure-Engineer
+# ML Infrastructure Engineer — Take-Home
 
-- LLM benchmarks
-- Build container checking cluster capabilities for training/inference
-- 
+PoC for the [ML Infrastructure Engineer take-home assignment](docs/ML-Infrastructure-Engineer.md):
+validate a Nebius GPU cluster's capabilities, then run a training/inference
+workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
 
-Nebius Console:
-- https://console.nebius.com/project-e00av8n3pr00m43x3c6qd7
-csa-hiring-sandbox2
-aurora-hiring-poc
+**Nebius project:** [`ml-infra-poc`](https://console.nebius.com/project-e00rdtrppr0083wkrkw4td) (tenant `csa-hiring-sandbox2`)
+
+## Infrastructure as Code
+
+[`infra/`](infra/) has Terraform to reproduce the setup (network, mk8s cluster, GPU node group, container registry) from scratch in a Nebius project — see its [README](infra/README.md).
 
 ## Cluster Validator
 
