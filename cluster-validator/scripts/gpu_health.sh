@@ -31,13 +31,17 @@ fi
 
 MAX_TEMP_SEEN=0
 TOTAL_UNCORRECTED=0
+TOTAL_CORRECTED=0
 while IFS=',' read -r idx name driver temp ecc_uncorr ecc_corr; do
     temp="$(echo "$temp" | xargs)"
     ecc_uncorr="$(echo "$ecc_uncorr" | xargs)"
+    ecc_corr="$(echo "$ecc_corr" | xargs)"
     [[ "$temp" =~ ^[0-9]+$ ]] || temp=0
     [[ "$ecc_uncorr" =~ ^[0-9]+$ ]] || ecc_uncorr=0
+    [[ "$ecc_corr" =~ ^[0-9]+$ ]] || ecc_corr=0
     (( temp > MAX_TEMP_SEEN )) && MAX_TEMP_SEEN=$temp
     (( TOTAL_UNCORRECTED += ecc_uncorr ))
+    (( TOTAL_CORRECTED += ecc_corr ))
     if (( temp > MAX_GPU_TEMP_C )); then
         FAIL_REASONS+=("GPU $idx ($name) temperature ${temp}C exceeds ${MAX_GPU_TEMP_C}C")
     fi
@@ -46,11 +50,15 @@ while IFS=',' read -r idx name driver temp ecc_uncorr ecc_corr; do
     fi
 done <<< "$SMI_CSV"
 
+# Corrected ECC errors don't fail the check (the hardware already recovered
+# from them), but they're a genuine early-warning signal for degrading memory
+# worth surfacing in the metrics/logs rather than silently discarding.
 METRICS=$(jq -n \
     --argjson gpu_count "$GPU_COUNT" \
     --argjson max_temp_c "$MAX_TEMP_SEEN" \
     --argjson uncorrectable_ecc_errors "$TOTAL_UNCORRECTED" \
-    '{gpu_count: $gpu_count, max_temp_c: $max_temp_c, uncorrectable_ecc_errors: $uncorrectable_ecc_errors}')
+    --argjson corrected_ecc_errors "$TOTAL_CORRECTED" \
+    '{gpu_count: $gpu_count, max_temp_c: $max_temp_c, uncorrectable_ecc_errors: $uncorrectable_ecc_errors, corrected_ecc_errors: $corrected_ecc_errors}')
 
 if [[ ${#FAIL_REASONS[@]} -eq 0 ]]; then
     write_result "$NAME" "pass" "$GPU_COUNT GPU(s) healthy, max temp ${MAX_TEMP_SEEN}C" "$METRICS"
