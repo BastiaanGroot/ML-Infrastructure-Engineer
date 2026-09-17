@@ -18,9 +18,14 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      # Requires a `nebius-registry` imagePullSecret if the node group's
+      # service account lacks Container Registry viewer access — see
+      # cluster-validator/README.md "Pulling the image" section.
+      imagePullSecrets:
+        - name: nebius-registry
       containers:
         - name: cluster-validator
-          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:test
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v1
           env:
             - name: STORAGE_PATHS
               value: "/mnt/network-disk,/mnt/shared-fs"
@@ -51,4 +56,5 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      # 2Ti matches the exercise's PoC environment spec (2TB network disk).
+      storage: 2Ti

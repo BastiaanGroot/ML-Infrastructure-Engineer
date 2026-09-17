@@ -42,7 +42,7 @@ docker run --rm --gpus all \
 ## Run on the cluster
 
 - **Single-node checks** (GPU health + NCCL within one node + LLM smoketest + storage): `k8s/job-validate.yaml`
-- **Multi-node InfiniBand check** (2x 8-GPU nodes, matching the 16-GPU PoC capacity): `k8s/job-nccl-multinode.yaml` (requires the [MPI Operator](https://github.com/kubeflow/mpi-operator)). This targets the **future** node group once we switch from the current 1-GPU-per-node preset to `8gpu-128vcpu-1600gb` x 2 nodes (see the root README's Design Choices) — the Nebius Solutions Library's [`k8s-training`](https://github.com/nebius/nebius-solutions-library/tree/main/k8s-training) module confirms this is the correct preset name for InfiniBand-connected 8-GPU nodes.
+- **Multi-node InfiniBand check** (2x 8-GPU nodes, matching the 16-GPU PoC capacity): `k8s/job-nccl-multinode.yaml` (requires the [MPI Operator](https://github.com/kubeflow/mpi-operator)). This targets the **future** node group — see the root README's ["Future hardware: 2x8-GPU nodes with InfiniBand"](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband) for the full switch plan (preset, GPU-cluster resource, MPI Operator install).
 
 ```bash
 kubectl apply -f k8s/job-validate.yaml
@@ -90,8 +90,8 @@ All checks are controlled via environment variables (see comments at the top of 
 bucket at the end of a run (in addition to the stdout logs already shipped to
 Nebius Logging — see [`docs/observability.md`](../docs/observability.md)),
 useful for retention past Logging's 14-day default. [`infra/main.tf`](../infra/main.tf)
-defines a `nebius_storage_v1_bucket` (`<cluster_name>-logs`) for this; it
-hasn't been applied against the live project yet (see `infra/README.md`).
+defines a `nebius_storage_v1_bucket` (`<cluster_name>-logs`) for this — it's
+live (bucket `ml-infra-poc-logs`).
 
 To use it, set `UPLOAD_LOGS_BUCKET` (and optionally `UPLOAD_LOGS_ENDPOINT` /
 `UPLOAD_LOGS_PREFIX`) plus S3 credentials with write access to the bucket.
@@ -146,3 +146,70 @@ Each check writes a JSON result to `$RESULTS_DIR/<check>.json` (default
 plus a human-readable log on stdout. Exit code is `0` only if every enabled
 check passed. If `UPLOAD_LOGS_BUCKET` is set, `summary.json` is also uploaded
 to Object Storage (see above).
+
+## Results (last validated run)
+
+Ran via `k8s/job-validate.yaml` on the live PoC cluster (2x `gpu-h200-sxm`
+nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
+2026-09-17. Full `summary.json`:
+
+```json
+[
+  {
+    "name": "gpu_health",
+    "status": "pass",
+    "message": "1 GPU(s) healthy, max temp 29C",
+    "metrics": { "gpu_count": 1, "max_temp_c": 29, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
+  },
+  {
+    "name": "nccl_bench",
+    "status": "fail",
+    "message": "avg bus bandwidth 0 GB/s below threshold 100 GB/s",
+    "metrics": { "gpu_count": 1, "avg_busbw_gbps": 0, "out_of_bounds": 0 }
+  },
+  {
+    "name": "llm_smoketest",
+    "status": "pass",
+    "message": "generated 20 tokens and completed a backward pass on NVIDIA H200",
+    "metrics": { "device_name": "NVIDIA H200", "load_seconds": 0.297, "generation_seconds": 0.344, "tokens_generated": 20, "backward_pass_ok": true }
+  },
+  {
+    "name": "storage_bench",
+    "status": "pass",
+    "message": "storage benchmark completed for: /mnt/network-disk, /mnt/shared-fs",
+    "metrics": {
+      "paths": [
+        { "path": "/mnt/network-disk", "read_bw_mbps": 219.6, "write_bw_mbps": 223.7, "read_iops": 219.6, "write_iops": 223.7 },
+        { "path": "/mnt/shared-fs", "read_bw_mbps": 2012.6, "write_bw_mbps": 2007.3, "read_iops": 2012.6, "write_iops": 2007.3 }
+      ]
+    }
+  }
+]
+```
+
+**Reading these:**
+
+- **GPU health** — pass. `nvidia-smi` reports a healthy H200 (143 GiB HBM3e), 29°C idle, zero ECC errors.
+- **NCCL bench — expected fail, not a bug.** `all_reduce_perf -g 1` has nothing
+  to actually reduce across on a single-GPU node, so bus bandwidth reads `0`
+  and trips the (NVLink/IB-oriented) 100 GB/s threshold. This check only
+  becomes meaningful once nodes have ≥2 GPUs — see the [multi-node /
+  future-hardware note](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband)
+  for the 8-GPU + InfiniBand plan this is written for.
+- **LLM smoketest — pass.** A real `generate()` (inference) plus one
+  forward+backward pass (training) both ran successfully on GPU in well
+  under a second, confirming the PyTorch/CUDA/Transformers stack works end
+  to end, not just raw `nvidia-smi` numbers.
+- **Storage bench — pass, and the two paths land very differently, as expected:**
+  the network-disk PVC (`compute-csi-default-sc`, backed by a Nebius Network
+  SSD block volume over the network) does ~220 MB/s read+write; the
+  shared-fs mount (Nebius Shared Filesystem, `virtiofs`) does ~2 GB/s — a
+  10x difference that reflects the different storage backends, not a
+  misconfiguration. Neither a `FIO_MIN_THROUGHPUT_MBPS` threshold was set for
+  this run, so both simply report their numbers.
+
+**Live view while a job runs:** the [Grafana dashboard](#grafana-dashboard)
+above overlays GPU temp/utilization/power from Nebius Monitoring with
+`cluster-validator`'s own log lines from Nebius Logging, filterable by node —
+see [`docs/observability.md`](../docs/observability.md) for the verified
+agent → Logging/Monitoring → Grafana pipeline and an example LogQL query.
