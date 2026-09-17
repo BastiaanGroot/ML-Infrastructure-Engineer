@@ -1,40 +1,46 @@
 # Reproduces the PoC setup from scratch in a given Nebius project:
-# network + subnet, an mk8s cluster, one GPU node group, and a container
-# registry for the cluster-validator (and any other) images.
+# network + subnet, an mk8s cluster, one GPU node group, a shared filesystem,
+# a container registry, and an Object Storage bucket for logs.
 #
 # The hand-built PoC cluster (created via the Nebius console wizard) has
 # since been imported into local state for verification (`terraform import`,
 # not committed — state stays local/gitignored). Values below (etcd size,
-# k8s version, boot disk, GPU driver/OS) were reconciled to match it, since
-# those are sensible defaults for any deployment. The node group's SSH
-# access, filesystem mount, and extra security group are environment
-# -specific (not secrets, but not sane defaults for a fresh deploy either)
-# — they're optional variables, unset by default; see
-# terraform.tfvars.example. Set them via a local terraform.tfvars (gitignored)
-# to adopt an already-existing node group's config without an `apply` trying
-# to strip them. The console wizard also gave the network/subnet/node group
-# auto-generated names (e.g. "default-network") — renaming them to the names
-# below is a safe, non-destructive diff whenever this is applied.
+# k8s version, boot disk, GPU driver/OS, filesystem size) were reconciled to
+# match it (then the filesystem was grown to 2 TiB to match the exercise
+# spec), since those are sensible defaults for any deployment. The node
+# group's SSH access and extra security group remain environment-specific
+# (not secrets, but not sane defaults for a fresh deploy either) — they're
+# optional variables, unset by default; see terraform.tfvars.example. Set
+# them via a local terraform.tfvars (gitignored) to adopt an already-existing
+# node group's config without an `apply` trying to strip them. The console
+# wizard also gave the network/subnet/node group/filesystem auto-generated
+# names (e.g. "default-network") — renaming them to the names below is a
+# safe, non-destructive diff whenever this is applied.
 
-# Cloud-init for GPU nodes: only set at all if an SSH key was provided (see
-# variables.tf). The filesystem mount step is only appended if a filesystem
-# ID was also provided; the mount_tag here must match the one used in the
+# Cloud-init for GPU nodes: the shared-filesystem mount (runcmd) always runs.
+# The SSH user/key block is only added if a key was provided (see
+# variables.tf) — without one, nodes still come up and mount the filesystem,
+# just with no SSH access. The mount_tag here must match the one used in the
 # node group's `filesystems` block below.
 locals {
-  node_group_cloud_init_user_data = var.node_group_ssh_public_key == null ? null : <<-EOT
-    users:
-     - name: ${var.node_group_ssh_user}
-       sudo: ALL=(ALL) NOPASSWD:ALL
-       shell: /bin/bash
-       ssh_authorized_keys:
-        - ${var.node_group_ssh_public_key}
-    %{if var.node_group_filesystem_id != null~}
-    runcmd:
-      - sudo mkdir -p ${var.node_group_filesystem_mount_path}
-      - sudo mount -t virtiofs ${var.node_group_filesystem_mount_tag} ${var.node_group_filesystem_mount_path}
-      - echo ${var.node_group_filesystem_mount_tag} ${var.node_group_filesystem_mount_path} "virtiofs" "defaults,nofail" "0" "0" | sudo tee -a /etc/fstab
-    %{endif~}
-  EOT
+  # NOTE: left-flush (no `<<-` dedent) — mixing `<<-` indentation-stripping
+  # with a `%{if~}` directive as the first line of a block has a sharp edge
+  # where the first content line right after the directive doesn't get
+  # dedented correctly. Left-flush avoids that entirely.
+  node_group_cloud_init_user_data = <<EOT
+%{if var.node_group_ssh_public_key != null~}
+users:
+ - name: ${var.node_group_ssh_user}
+   sudo: ALL=(ALL) NOPASSWD:ALL
+   shell: /bin/bash
+   ssh_authorized_keys:
+    - ${var.node_group_ssh_public_key}
+%{endif~}
+runcmd:
+  - sudo mkdir -p ${var.node_group_filesystem_mount_path}
+  - sudo mount -t virtiofs ${var.node_group_filesystem_mount_tag} ${var.node_group_filesystem_mount_path}
+  - echo ${var.node_group_filesystem_mount_tag} ${var.node_group_filesystem_mount_path} "virtiofs" "defaults,nofail" "0" "0" | sudo tee -a /etc/fstab
+EOT
 }
 
 resource "nebius_vpc_v1_network" "main" {
@@ -55,9 +61,25 @@ resource "nebius_vpc_v1_subnet" "main" {
   }
 }
 
+# Shared filesystem mounted read/write on every GPU node (e.g. for shared
+# checkpoints/data). Sized to match the exercise's PoC environment spec.
+resource "nebius_compute_v1_filesystem" "shared" {
+  parent_id        = var.project_id
+  name             = "${var.cluster_name}-filesystem"
+  type             = "NETWORK_SSD"
+  size_gibibytes   = var.filesystem_size_gibibytes
+  block_size_bytes = 4096
+}
+
 resource "nebius_mk8s_v1_cluster" "main" {
   parent_id = var.project_id
   name      = var.cluster_name
+  # The console wizard's internal progress-tracking label; the API keeps
+  # re-adding it regardless, so it's declared here to match reality instead
+  # of fighting it every apply.
+  labels = {
+    "mk8s-wizard-create-progress" = "true"
+  }
 
   control_plane = {
     subnet_id         = nebius_vpc_v1_subnet.main.id
@@ -95,12 +117,12 @@ resource "nebius_mk8s_v1_node_group" "gpu" {
 
     cloud_init_user_data = local.node_group_cloud_init_user_data
 
-    filesystems = var.node_group_filesystem_id == null ? null : [
+    filesystems = [
       {
         attach_mode = "READ_WRITE"
         mount_tag   = var.node_group_filesystem_mount_tag
         existing_filesystem = {
-          id = var.node_group_filesystem_id
+          id = nebius_compute_v1_filesystem.shared.id
         }
       }
     ]
@@ -115,6 +137,35 @@ resource "nebius_mk8s_v1_node_group" "gpu" {
       }
     ]
   }
+}
+
+# Nebius-managed MLflow, for tracking Option 1's training runs across
+# distribution-strategy experiments. Gated behind enable_mlflow (see
+# variables.tf) since it's a real, ongoing-cost managed service — this
+# resource block exists so it's one `terraform apply` away, without
+# accidentally provisioning it today. The admin password is generated by
+# Terraform (random_password), stored only in local state (gitignored,
+# never committed) — see infra/README.md for pushing it into SecretStash
+# for retrieval after creation.
+resource "random_password" "mlflow_admin" {
+  count            = var.enable_mlflow ? 1 : 0
+  length           = 24
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "nebius_msp_mlflow_v1alpha1_cluster" "main" {
+  count       = var.enable_mlflow ? 1 : 0
+  parent_id   = var.project_id
+  name        = "${var.cluster_name}-mlflow"
+  description = "MLflow tracking server for Option 1 (training) distribution-strategy experiments."
+
+  network_id         = nebius_vpc_v1_network.main.id
+  service_account_id = var.mlflow_service_account_id
+  admin_username     = var.mlflow_admin_username
+  admin_password     = random_password.mlflow_admin[0].result
+  size               = var.mlflow_size
+  public_access      = false
 }
 
 resource "nebius_registry_v1_registry" "cluster_validator" {

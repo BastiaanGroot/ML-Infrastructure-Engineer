@@ -6,10 +6,10 @@ project_id = "project-xxxxxxxxxxxxxxxxxxxxxx"
 
 # Adopting an already-existing GPU node group (e.g. after `terraform
 # import`)? Set these to match it so `terraform plan` doesn't try to strip
-# SSH access / unmount a filesystem / detach a security group.
+# SSH access or detach a security group. (The shared filesystem is now a
+# managed resource, no longer an optional variable — see filesystem_size_gibibytes
+# and node_group_filesystem_mount_{path,tag} in variables.tf if you need to
+# override its defaults.)
 # node_group_ssh_public_key     = "ssh-ed25519 AAAA... you@example.com"
 # node_group_ssh_user           = "ubuntu"
-# node_group_filesystem_id      = "computefilesystem-xxxxxxxxxxxxxxxxxxxxxx"
-# node_group_filesystem_mount_path = "/mnt/shared"
-# node_group_filesystem_mount_tag  = "filesystem-0"
 # node_group_security_group_ids = ["vpcsecuritygroup-xxxxxxxxxxxxxxxxxxxxxx"]

@@ -6,6 +6,10 @@ terraform {
       source  = "nebius/nebius"
       version = ">= 0.6.8"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6"
+    }
   }
 }
 

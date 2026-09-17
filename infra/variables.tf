@@ -28,7 +28,7 @@ variable "gpu_platform" {
 }
 
 variable "gpu_preset" {
-  description = "Resource preset for the GPU node group. Note: at time of writing, 8-GPU presets on this platform may be capacity-constrained (see docs/observability.md and README design choices) — this defaults to the 1-GPU preset that was actually available. Future target once capacity allows: \"8gpu-128vcpu-1600gb\" (2 nodes x 8 GPUs = 16 GPUs total, matching the PoC spec) — confirmed as the correct preset name for InfiniBand-connected 8-GPU nodes by the Nebius Solutions Library's k8s-training module (https://github.com/nebius/nebius-solutions-library/tree/main/k8s-training)."
+  description = "Resource preset for the GPU node group. Defaults to the 1-GPU preset actually available at time of writing (8-GPU presets are capacity-constrained) — see the root README's \"Future hardware: 2x8-GPU nodes with InfiniBand\" section for the target preset and the rest of the switch plan (incl. a currently-missing nebius_compute_v1_gpu_cluster resource)."
   type        = string
   default     = "1gpu-16vcpu-200gb"
 }
@@ -39,17 +39,34 @@ variable "gpu_node_count" {
   default     = 2
 }
 
-# The three variables below are all optional and environment-specific (not
-# secrets - an SSH key here is a *public* key, and the other two are just
-# resource IDs - but not meaningful defaults for a fresh deployment either).
-# Left unset, node groups come up with no SSH access, no extra filesystem
-# mount, and no extra security group, same as before these were added. Set
-# them via a local, gitignored terraform.tfvars (see terraform.tfvars.example)
-# to adopt an already-existing node group's config, e.g. after `terraform
-# import`.
+variable "filesystem_size_gibibytes" {
+  description = "Size of the shared filesystem mounted on GPU nodes, in GiB. 2048 (2 TiB) matches the exercise's PoC environment spec."
+  type        = number
+  default     = 2048
+}
+
+variable "node_group_filesystem_mount_path" {
+  description = "Mount path inside GPU nodes for the shared filesystem."
+  type        = string
+  default     = "/mnt/filesystem-s6"
+}
+
+variable "node_group_filesystem_mount_tag" {
+  description = "Mount tag (virtiofs device tag) for the shared filesystem. Must match between the node group's filesystems block and the cloud-init mount command, which this variable drives for both."
+  type        = string
+  default     = "filesystem-s6"
+}
+
+# The two variables below are optional and environment-specific (not
+# secrets - an SSH key here is a *public* key, and the other is just a list
+# of resource IDs - but not a meaningful default for a fresh deployment
+# either). Left unset, node groups come up with no SSH access and no extra
+# security group, same as before these were added. Set them via a local,
+# gitignored terraform.tfvars (see terraform.tfvars.example) to adopt an
+# already-existing node group's config, e.g. after `terraform import`.
 
 variable "node_group_ssh_public_key" {
-  description = "Optional SSH public key to grant access to GPU nodes via cloud-init. Also used as the cloud-init trigger: if unset, no cloud-init user-data is set at all (no filesystem mount script either)."
+  description = "Optional SSH public key to grant access to GPU nodes via cloud-init. If unset, nodes still come up (and still mount the shared filesystem) but with no SSH user configured."
   type        = string
   default     = null
 }
@@ -60,26 +77,38 @@ variable "node_group_ssh_user" {
   default     = "ubuntu"
 }
 
-variable "node_group_filesystem_id" {
-  description = "Optional existing Nebius Shared Filesystem ID to mount on GPU nodes (e.g. for shared checkpoints/data). Only mounted if node_group_ssh_public_key is also set, since the mount happens via the same cloud-init runcmd."
-  type        = string
-  default     = null
-}
-
-variable "node_group_filesystem_mount_path" {
-  description = "Mount path inside GPU nodes for node_group_filesystem_id."
-  type        = string
-  default     = "/mnt/shared"
-}
-
-variable "node_group_filesystem_mount_tag" {
-  description = "Mount tag (virtiofs device tag) for node_group_filesystem_id. Must match between the node group's filesystems block and the cloud-init mount command, which this variable drives for both."
-  type        = string
-  default     = "filesystem-0"
-}
-
 variable "node_group_security_group_ids" {
   description = "Optional additional VPC security group IDs to attach to GPU node network interfaces."
   type        = list(string)
   default     = []
+}
+
+# Nebius-managed MLflow (msp mlflow), for tracking Option 1's training
+# efficiency across distribution-strategy experiments. Off by default since
+# it's a real, ongoing-cost managed service (compute + managed Postgres +
+# storage) — flip enable_mlflow to true (and `terraform apply`) when Option 1
+# work actually starts. mlflow_service_account_id defaults to the "mlflow-sa"
+# service account already created in the project for this purpose.
+variable "enable_mlflow" {
+  description = "Whether to create the Nebius-managed MLflow cluster. Off by default (real ongoing cost) — see infra/README.md."
+  type        = bool
+  default     = false
+}
+
+variable "mlflow_service_account_id" {
+  description = "Service account MLflow uses to access its Object Storage bucket. Defaults to the pre-existing \"mlflow-sa\" service account in this project."
+  type        = string
+  default     = "serviceaccount-e00fdpk94g3qnyh4ca"
+}
+
+variable "mlflow_admin_username" {
+  description = "MLflow admin username."
+  type        = string
+  default     = "admin"
+}
+
+variable "mlflow_size" {
+  description = "Size (compute allocation) for the MLflow cluster. Left unset uses the smallest available size in the region."
+  type        = string
+  default     = null
 }
