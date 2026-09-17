@@ -5,7 +5,7 @@ capabilities before running a training or inference job. Covers:
 
 1. **GPU health** — `nvidia-smi` based checks (GPU count, temperature, ECC errors).
 2. **GPU interconnect** — NCCL bandwidth via [`nccl-tests`](https://github.com/NVIDIA/nccl-tests) (NVLink within a node; InfiniBand across nodes for the multi-node variant).
-3. **LLM smoketest** — loads a tiny open-source causal-LM checkpoint (PyTorch + Transformers) and runs a short `generate()` (inference path) plus one forward+backward pass (training path) on GPU, so the actual ML framework stack is validated, not just raw GPU/NCCL numbers.
+3. **LLM smoketest** — loads a real, minimal Qwen3-0.6B checkpoint (PyTorch + Transformers, same model family as [`training/`](../training/README.md)) and runs a short `generate()` (inference path) plus one forward+backward pass (training path) on GPU, so the actual ML framework stack is validated, not just raw GPU/NCCL numbers.
 4. **Storage throughput** — `fio` against the mounted network disk and shared filesystem.
 
 Built on top of Nebius's own public benchmark image
@@ -74,7 +74,7 @@ All checks are controlled via environment variables (see comments at the top of 
 | `MAX_GPU_TEMP_C` | `85` | Max acceptable GPU temperature |
 | `NCCL_BENCH_ARGS` | `-b 512M -e 8G -f 2 -g <local GPU count>` | Args passed to `all_reduce_perf` |
 | `NCCL_MIN_BUSBW_GBPS` | `100` | Minimum acceptable avg bus bandwidth |
-| `LLM_SMOKETEST_MODEL_PATH` | `/opt/validate/tiny-llm` | Path to the baked-in tiny checkpoint |
+| `LLM_SMOKETEST_MODEL_PATH` | `/opt/validate/qwen3-0.6b` | Path to the baked-in Qwen3-0.6B checkpoint |
 | `LLM_SMOKETEST_PROMPT` | `"Nebius GPU cluster validation:"` | Prompt used for the smoketest |
 | `LLM_SMOKETEST_MAX_NEW_TOKENS` | `20` | Tokens to generate during the smoketest |
 | `STORAGE_PATHS` | `/mnt/network-disk,/mnt/shared-fs` | Comma-separated paths to benchmark (skipped if not mounted) |
@@ -166,7 +166,9 @@ to Object Storage (see above).
 
 Ran via `k8s/job-validate.yaml` on the live PoC cluster (2x `gpu-h200-sxm`
 nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
-2026-09-17. Full `summary.json`:
+2026-09-17 (rerun after switching the LLM smoketest to a real Qwen3-0.6B
+checkpoint — same model family as [`training/`](../training/README.md),
+replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
 
 ```json
 [
@@ -186,7 +188,7 @@ nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
     "name": "llm_smoketest",
     "status": "pass",
     "message": "generated 20 tokens and completed a backward pass on NVIDIA H200",
-    "metrics": { "device_name": "NVIDIA H200", "load_seconds": 0.297, "generation_seconds": 0.344, "tokens_generated": 20, "backward_pass_ok": true }
+    "metrics": { "device_name": "NVIDIA H200", "load_seconds": 0.275, "generation_seconds": 0.335, "tokens_generated": 20, "backward_pass_ok": true }
   },
   {
     "name": "storage_bench",
@@ -194,8 +196,8 @@ nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
     "message": "storage benchmark completed for: /mnt/network-disk, /mnt/shared-fs",
     "metrics": {
       "paths": [
-        { "path": "/mnt/network-disk", "read_bw_mbps": 219.6, "write_bw_mbps": 223.7, "read_iops": 219.6, "write_iops": 223.7 },
-        { "path": "/mnt/shared-fs", "read_bw_mbps": 2012.6, "write_bw_mbps": 2007.3, "read_iops": 2012.6, "write_iops": 2007.3 }
+        { "path": "/mnt/network-disk", "read_bw_mbps": 219.5, "write_bw_mbps": 223.6, "read_iops": 219.5, "write_iops": 223.6 },
+        { "path": "/mnt/shared-fs", "read_bw_mbps": 2092.0, "write_bw_mbps": 2082.3, "read_iops": 2092.0, "write_iops": 2082.3 }
       ]
     }
   }
@@ -211,10 +213,13 @@ nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
   becomes meaningful once nodes have ≥2 GPUs — see the [multi-node /
   future-hardware note](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband)
   for the 8-GPU + InfiniBand plan this is written for.
-- **LLM smoketest — pass.** A real `generate()` (inference) plus one
-  forward+backward pass (training) both ran successfully on GPU in well
-  under a second, confirming the PyTorch/CUDA/Transformers stack works end
-  to end, not just raw `nvidia-smi` numbers.
+- **LLM smoketest — pass, now on the actual model family we train.** A real
+  `generate()` (inference) plus one forward+backward pass (training) both
+  ran successfully on GPU in well under a second, loading a real Qwen3-0.6B
+  checkpoint rather than an architecture-unrelated random-weight test model
+  - confirming the PyTorch/CUDA/Transformers stack works end to end for the
+  actual model family used in [`training/`](../training/README.md), not
+  just raw `nvidia-smi` numbers.
 - **Storage bench — pass, and the two paths land very differently, as expected:**
   the network-disk PVC (`compute-csi-default-sc`, backed by a Nebius Network
   SSD block volume over the network) does ~220 MB/s read+write; the

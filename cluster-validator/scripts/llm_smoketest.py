@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""LLM smoketest: loads a tiny open-source causal-LM checkpoint baked into
-the image (see Dockerfile) and runs a short model.generate() (the inference
-path) plus one forward+backward pass (the training path) on GPU.
+"""LLM smoketest: loads a real, minimal Qwen3-0.6B checkpoint baked into the
+image (see Dockerfile - same model family as the actual training
+experiments in ../training/, so this is Qwen3 end-to-end, not an unrelated
+architecture) and runs a short model.generate() (the inference path) plus
+one forward+backward pass (the training path) on GPU.
 
 This validates the actual ML framework stack (CUDA <-> driver <-> PyTorch <->
 model loading/execution) end-to-end - gpu_health.sh and nccl_bench.sh already
@@ -15,7 +17,7 @@ summary aggregation picks it up like every other check.
 
 Env vars:
   RESULTS_DIR                   - where to write llm_smoketest.json (default: /results)
-  LLM_SMOKETEST_MODEL_PATH      - path to the baked-in checkpoint (default: /opt/validate/tiny-llm)
+  LLM_SMOKETEST_MODEL_PATH      - path to the baked-in checkpoint (default: /opt/validate/qwen3-0.6b)
   LLM_SMOKETEST_PROMPT          - prompt text (default: "Nebius GPU cluster validation:")
   LLM_SMOKETEST_MAX_NEW_TOKENS  - tokens to generate (default: 20)
 """
@@ -26,7 +28,7 @@ import time
 
 NAME = "llm_smoketest"
 RESULTS_DIR = os.environ.get("RESULTS_DIR", "/results")
-MODEL_PATH = os.environ.get("LLM_SMOKETEST_MODEL_PATH", "/opt/validate/tiny-llm")
+MODEL_PATH = os.environ.get("LLM_SMOKETEST_MODEL_PATH", "/opt/validate/qwen3-0.6b")
 PROMPT = os.environ.get("LLM_SMOKETEST_PROMPT", "Nebius GPU cluster validation:")
 MAX_NEW_TOKENS = int(os.environ.get("LLM_SMOKETEST_MAX_NEW_TOKENS", "20"))
 

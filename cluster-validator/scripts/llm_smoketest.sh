@@ -2,10 +2,10 @@
 # LLM smoketest: validates the actual ML framework stack (CUDA <-> driver <->
 # PyTorch <-> model loading) works end-to-end - see gpu_health.sh and
 # nccl_bench.sh for raw GPU health / interconnect throughput, which this
-# deliberately does not re-test. Loads a tiny open-source causal-LM
-# checkpoint baked into the image (see Dockerfile) and runs a short
-# generate() (inference path) plus one forward+backward pass (training path)
-# on GPU via llm_smoketest.py.
+# deliberately does not re-test. Loads a real, minimal Qwen3-0.6B checkpoint
+# baked into the image (see Dockerfile - same model family as ../training/)
+# and runs a short generate() (inference path) plus one forward+backward
+# pass (training path) on GPU via llm_smoketest.py.
 #
 # Env vars: see llm_smoketest.py.
 set -uo pipefail
