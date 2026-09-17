@@ -165,7 +165,7 @@ resource "nebius_msp_mlflow_v1alpha1_cluster" "main" {
   admin_username     = var.mlflow_admin_username
   admin_password     = random_password.mlflow_admin[0].result
   size               = var.mlflow_size
-  public_access      = false
+  public_access      = true # PoC: browser access to the tracking UI; still gated by admin_username/admin_password
 }
 
 resource "nebius_registry_v1_registry" "cluster_validator" {
