@@ -86,41 +86,55 @@ All checks are controlled via environment variables (see comments at the top of 
 
 ## Uploading logs to Object Storage
 
-`run.sh` can optionally upload `summary.json` to a Nebius Object Storage
-bucket at the end of a run (in addition to the stdout logs already shipped to
+`run.sh` optionally uploads `summary.json` to a Nebius Object Storage bucket
+at the end of a run (in addition to the stdout logs already shipped to
 Nebius Logging — see [`docs/observability.md`](../docs/observability.md)),
-useful for retention past Logging's 14-day default. [`infra/main.tf`](../infra/main.tf)
-defines a `nebius_storage_v1_bucket` (`<cluster_name>-logs`) for this — it's
-live (bucket `ml-infra-poc-logs`).
+useful for retention past Logging's 14-day default. **Live and verified
+end-to-end** via [`k8s/job-validate.yaml`](k8s/job-validate.yaml), which
+sets `UPLOAD_LOGS_BUCKET=ml-infra-poc-logs` and an `envFrom` secret ref for
+the AWS-style credentials. Example object from a real run:
+`s3://ml-infra-poc-logs/cluster-validator/cluster-validator-wsqfc/20260917T120216Z/summary.json`.
 
-To use it, set `UPLOAD_LOGS_BUCKET` (and optionally `UPLOAD_LOGS_ENDPOINT` /
-`UPLOAD_LOGS_PREFIX`) plus S3 credentials with write access to the bucket.
-Create a Nebius IAM (AWS-compatible) access key for a service account,
+Everything needed to grant a workload write access is defined in
+[`infra/main.tf`](../infra/main.tf) — no manual IAM console/CLI step:
+
+- `nebius_storage_v1_bucket.logs` — the bucket (`ml-infra-poc-logs`), with a
+  `bucket_policy` rule granting `storage.editor` on `*` to an IAM group.
+- `nebius_iam_v1_service_account.cluster_validator_logs` — the workload
+  identity.
+- `nebius_iam_v1_group.cluster_validator_logs_writers` +
+  `nebius_iam_v1_group_membership` — the service account joins this group
+  (Nebius Object Storage roles are only grantable to a *group* in a bucket
+  policy, not straight to a service account, so this group exists purely to
+  satisfy that).
+
+The one thing Terraform can't do is mint an actual access key (it's a
+secret, deliberately not something you want in state). Create it once,
 delivered straight into SecretStash (Nebius's secrets-management service —
-CLI/API name `mysterybox`) so the secret value never touches your terminal
-or shell history, then wire it into a Kubernetes Secret, similar to the
-registry pull-secret pattern above:
+CLI/API name `mysterybox`) so the plaintext never touches your terminal
+history, then wire it into a Kubernetes Secret:
 
 ```bash
 nebius iam v2 access-key create \
-  --parent-id <project-id> --account-service-account-id <service-account-id> \
+  --parent-id <project-id> \
+  --account-service-account-id "$(terraform -chdir=../infra output -raw cluster_validator_logs_service_account_id)" \
   --description "cluster-validator logs upload" --secret-delivery-mode mystery_box
-# note metadata.id (the access key's own ID) and status.aws_access_key_id
-# from the output - both non-secret. status.secret_reference_id is the
-# SecretStash secret holding the actual secret value (never printed).
+# note status.aws_access_key_id (non-secret) and status.secret_reference_id
+# (the SecretStash secret holding the actual secret value, never printed)
 
 kubectl create secret generic cluster-validator-logs-creds \
   --from-literal=AWS_ACCESS_KEY_ID=<status.aws_access_key_id> \
-  --from-literal=AWS_SECRET_ACCESS_KEY="$(nebius mysterybox payload get-by-key --secret-id <status.secret_reference_id> --key secret)"
-# then reference both keys via `envFrom: [{secretRef: {name: cluster-validator-logs-creds}}]`
-# in the Job's pod spec, alongside UPLOAD_LOGS_BUCKET=<cluster_name>-logs.
+  --from-literal=AWS_SECRET_ACCESS_KEY="$(nebius mysterybox payload get-by-key --secret-id <status.secret_reference_id> --key secret --format json 2>&1 | grep -v 'token from' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["string_value"])')"
+# (the `grep -v` strips a stray "token from NEBIUS_IAM_TOKEN env is used"
+# line the CLI prints to stdout when using that auth method — see the
+# ops-gotchas rule)
 ```
 
 Because the secret lives in SecretStash (not just a one-time CLI printout),
-rebuilding the cluster or the Kubernetes Secret later is a matter of
-re-running the `kubectl create secret` step above with the same
-`--secret-id` — no need to regenerate the access key or have ever seen the
-plaintext value.
+rebuilding the Kubernetes Secret later (new cluster, rotated context, etc.)
+is a matter of re-running the `kubectl create secret` step above with the
+same `--secret-id` — no need to regenerate the access key or ever see the
+plaintext value outside that one command substitution.
 
 The upload is best-effort: a failure logs a warning but doesn't change the
 overall validation exit code (see `upload_logs.py`/`upload_logs.sh`).
