@@ -26,9 +26,17 @@ spec:
       containers:
         - name: cluster-validator
           image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v1
+          envFrom:
+            - secretRef:
+                # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the logs
+                # bucket upload below - see cluster-validator/README.md
+                # "Uploading logs to Object Storage".
+                name: cluster-validator-logs-creds
           env:
             - name: STORAGE_PATHS
               value: "/mnt/network-disk,/mnt/shared-fs"
+            - name: UPLOAD_LOGS_BUCKET
+              value: "ml-infra-poc-logs"
           resources:
             limits:
               nvidia.com/gpu: 1

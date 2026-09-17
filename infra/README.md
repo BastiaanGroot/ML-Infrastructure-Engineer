@@ -71,3 +71,22 @@ nebius mysterybox secret create --parent-id <project-id> --name mlflow-admin-pas
   --secret-version-payload "[{\"key\": \"password\", \"string_value\": \"$PASSWORD\"}]"
 unset PASSWORD
 ```
+
+## Logs bucket IAM (for cluster-validator log uploads)
+
+Granting a workload write access to the logs bucket is fully described in
+Terraform (`nebius_iam_v1_service_account.cluster_validator_logs`,
+`nebius_iam_v1_group.cluster_validator_logs_writers` +
+`nebius_iam_v1_group_membership`, and a `bucket_policy` rule on
+`nebius_storage_v1_bucket.logs`) — no manual IAM step. The group exists only
+because Nebius Object Storage roles are grantable to an IAM group, not
+directly to a service account. The one thing Terraform intentionally
+doesn't create is the actual access key (a secret) — see
+[`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)
+for that one-time `nebius iam v2 access-key create` + SecretStash step.
+
+The bucket also has a `lifecycle_configuration` rule that expires objects
+after `logs_bucket_retention_days` (default 90) — set via `terraform apply
+-var="logs_bucket_retention_days=<n>"`. Nebius Logging already covers the
+last 14 days of pod stdout; this is for the slightly-longer-lived
+`summary.json` uploads, not indefinite storage.

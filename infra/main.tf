@@ -178,10 +178,56 @@ resource "nebius_registry_v1_registry" "cluster_validator" {
 # any other job logs we later want to keep past Nebius Logging's 14-day
 # retention. See cluster-validator/README.md for the UPLOAD_LOGS_* env vars
 # and credentials needed to actually upload into this bucket from a Job.
+#
+# Access is granted via a bucket_policy rule to an IAM group (Nebius Object
+# Storage roles are only grantable to groups, not directly to a service
+# account — see the cluster_validator_logs_writers group/membership below).
 resource "nebius_storage_v1_bucket" "logs" {
   parent_id = var.project_id
   name      = "${var.cluster_name}-logs"
 
   default_storage_class = "STANDARD"
   versioning_policy     = "DISABLED"
+
+  bucket_policy = {
+    rules = [{
+      paths    = ["*"]
+      roles    = ["storage.editor"]
+      group_id = nebius_iam_v1_group.cluster_validator_logs_writers.id
+    }]
+  }
+
+  # Auto-expire objects (run logs) after N days instead of keeping them
+  # forever — Nebius Logging already covers the last 14 days; this bucket is
+  # for slightly-longer retention, not indefinite storage.
+  lifecycle_configuration = {
+    rules = [{
+      id     = "expire-old-logs"
+      status = "ENABLED"
+      expiration = {
+        days = var.logs_bucket_retention_days
+      }
+    }]
+  }
+}
+
+# Dedicated service account for cluster-validator's log uploads (kept
+# separate from mlflow-sa so each workload's blast radius stays minimal).
+resource "nebius_iam_v1_service_account" "cluster_validator_logs" {
+  parent_id   = var.project_id
+  name        = "cluster-validator-logs-sa"
+  description = "Uploads cluster-validator summary.json to the logs bucket."
+}
+
+# Group + membership just to satisfy the bucket_policy's group_id
+# requirement (Object Storage roles can't be granted straight to a service
+# account). One group, one member — no extra CLI/manual step needed.
+resource "nebius_iam_v1_group" "cluster_validator_logs_writers" {
+  parent_id = var.project_id
+  name      = "cluster-validator-logs-writers"
+}
+
+resource "nebius_iam_v1_group_membership" "cluster_validator_logs" {
+  parent_id = nebius_iam_v1_group.cluster_validator_logs_writers.id
+  member_id = nebius_iam_v1_service_account.cluster_validator_logs.id
 }

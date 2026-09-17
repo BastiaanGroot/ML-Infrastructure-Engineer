@@ -112,3 +112,9 @@ variable "mlflow_size" {
   type        = string
   default     = null
 }
+
+variable "logs_bucket_retention_days" {
+  description = "Days before an object in the logs bucket (cluster-validator summary.json etc.) auto-expires, via the bucket's lifecycle_configuration."
+  type        = number
+  default     = 90
+}

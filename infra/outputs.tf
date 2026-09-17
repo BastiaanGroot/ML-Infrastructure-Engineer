@@ -20,6 +20,16 @@ output "logs_bucket_name" {
   value       = nebius_storage_v1_bucket.logs.name
 }
 
+output "logs_bucket_id" {
+  description = "Object Storage bucket ID for the logs bucket."
+  value       = nebius_storage_v1_bucket.logs.id
+}
+
+output "cluster_validator_logs_service_account_id" {
+  description = "Service account ID used for cluster-validator log uploads — feed into `nebius iam v2 access-key create --account-service-account-id`, see cluster-validator/README.md."
+  value       = nebius_iam_v1_service_account.cluster_validator_logs.id
+}
+
 output "mlflow_admin_password" {
   description = "Generated MLflow admin password (only set when enable_mlflow=true). Push into SecretStash, don't leave it in local state/shell history any longer than needed."
   value       = try(random_password.mlflow_admin[0].result, null)
@@ -27,6 +37,6 @@ output "mlflow_admin_password" {
 }
 
 output "mlflow_tracking_endpoint" {
-  description = "Private MLflow tracking endpoint (only set when enable_mlflow=true), reachable from inside the VPC/mk8s cluster."
+  description = "MLflow tracking endpoint (only set when enable_mlflow=true). Public since public_access=true — see status.tracking_endpoints.private for the VPC-internal one."
   value       = try(nebius_msp_mlflow_v1alpha1_cluster.main[0].status.tracking_endpoint, null)
 }
