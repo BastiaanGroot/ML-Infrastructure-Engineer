@@ -12,7 +12,7 @@
         "name": "prometheus_ds",
         "type": "datasource",
         "query": "prometheus",
-        "current": {}
+        "current": { "text": "Nebius Services", "value": "P65CA746CF0DD005A" }
       },
       {
         "name": "loki_ds",
@@ -24,7 +24,7 @@
         "name": "node",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "${prometheus_ds}" },
-        "query": "label_values(DCGM_FI_DEV_GPU_TEMP, instance)",
+        "query": "label_values(DCGM_FI_DEV_GPU_TEMP, instance_id)",
         "includeAll": true,
         "multi": true,
         "current": { "text": "All", "value": "$__all" },
@@ -41,8 +41,8 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"$node\"}",
-          "legendFormat": "{{instance}} gpu {{uuid}}"
+          "expr": "DCGM_FI_DEV_GPU_TEMP{instance_id=~\"$node\"}",
+          "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
     },
@@ -54,8 +54,8 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_GPU_UTIL{instance=~\"$node\"}",
-          "legendFormat": "{{instance}} gpu {{uuid}}"
+          "expr": "DCGM_FI_DEV_GPU_UTIL{instance_id=~\"$node\"}",
+          "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
     },
@@ -67,8 +67,8 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_POWER_USAGE{instance=~\"$node\"}",
-          "legendFormat": "{{instance}} gpu {{uuid}}"
+          "expr": "DCGM_FI_DEV_POWER_USAGE{instance_id=~\"$node\"}",
+          "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
     },

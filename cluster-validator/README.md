@@ -128,9 +128,10 @@ overall validation exit code (see `upload_logs.py`/`upload_logs.sh`).
 ## Grafana dashboard
 
 [`grafana/cluster-validator-dashboard.json`](grafana/cluster-validator-dashboard.json)
-combines GPU temp/utilization/power (from Nebius Monitoring, via the
-[Nebius Observability Agent](../docs/observability.md)) with `cluster-validator`
-logs (from Nebius Logging) on one screen, filterable by node. Import it into
+combines GPU temp/utilization/power (from the pre-wired "Nebius Services"
+Prometheus datasource — see [observability.md](../docs/observability.md) for
+why that one and not "Nebius Monitoring") with `cluster-validator` logs
+(from Nebius Logging) on one screen, filterable by node. Import it into
 the cluster's Grafana:
 
 ```bash
@@ -209,7 +210,7 @@ nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
   this run, so both simply report their numbers.
 
 **Live view while a job runs:** the [Grafana dashboard](#grafana-dashboard)
-above overlays GPU temp/utilization/power from Nebius Monitoring with
+above overlays GPU temp/utilization/power from Nebius Services with
 `cluster-validator`'s own log lines from Nebius Logging, filterable by node —
 see [`docs/observability.md`](../docs/observability.md) for the verified
 agent → Logging/Monitoring → Grafana pipeline and an example LogQL query.
