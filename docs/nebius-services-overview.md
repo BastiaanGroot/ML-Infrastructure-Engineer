@@ -42,7 +42,7 @@ A reference list of Nebius platform services, grouped by category, with notes on
 | Service                  | Description                                          | Relevant?                                                                                         |
 | ------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Serverless AI            | Endpoints/jobs for containerized AI workloads        | Alternative to self-managed inference server (Option 2) — worth comparing against a custom server |
-| MLflow clusters          | Managed experiment tracking / model registry         | Useful for Option 1 to log training efficiency across distribution-strategy experiments — prepared in [`infra/main.tf`](../infra/main.tf) behind `enable_mlflow` (see `infra/README.md`), not yet created |
+| MLflow clusters          | Managed experiment tracking / model registry         | Useful for Option 1 to log training efficiency across distribution-strategy experiments — created via [`infra/main.tf`](../infra/main.tf) behind `enable_mlflow` (see `infra/README.md` for the tracking endpoint and admin credential) |
 | Applications             | Turnkey apps: JupyterLab, **vLLM**, Open WebUI, etc. | vLLM app is directly relevant to Option 2 (inference server)                                      |
 | Third-party integrations | Tools to orchestrate AI workloads                    | Check for existing training/inference framework integrations before building custom               |
 
@@ -75,7 +75,7 @@ A reference list of Nebius platform services, grouped by category, with notes on
 
 ## Security and cryptography
 
-- Key Management Service, SecretStash (secrets storage, CLI/API identifier `mysterybox`) — used in practice for the cluster-validator's Object Storage upload credential (see [`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)): `nebius iam v2 access-key create --secret-delivery-mode mystery_box` delivers the generated secret straight into a SecretStash secret, retrievable later via `nebius mysterybox payload get-by-key`.
+- Key Management Service, SecretStash (secrets storage, CLI/API identifier `mysterybox`) — used in practice for the cluster-validator's Object Storage upload credential (see [`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)): `nebius iam v2 access-key create --secret-delivery-mode mystery_box` delivers the generated secret straight into a SecretStash secret, retrievable later via `nebius mysterybox payload get-by-key`. Also used to hold the Terraform-generated MLflow admin password (see `infra/README.md`).
 
 
 
