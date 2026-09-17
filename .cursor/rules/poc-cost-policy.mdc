@@ -1,0 +1,22 @@
+---
+description: Cost policy for this PoC project — infra cost is not a blocker
+alwaysApply: true
+---
+
+# PoC environment: cost is not a concern
+
+This repo's Nebius project (`ml-infra-poc`) is a disposable take-home/PoC
+sandbox, not production. Infrastructure spend here is irrelevant to the
+user.
+
+- Don't hesitate to provision, resize, or leave running real Nebius
+  resources (GPU nodes, managed services like MLflow, storage, etc.) that
+  are needed to complete a task, and don't ask for cost-based confirmation
+  before doing so.
+- Still confirm before **destructive** actions (deleting real resources,
+  applying changes that would down GPU nodes/data), and still follow the
+  git push rules (never push to `main` without explicit confirmation) — this
+  rule only removes *cost* as a blocker, not other normal caution.
+- If asked to tear something down for cost reasons specifically, that's the
+  user's call to make explicitly each time — don't proactively suggest
+  shrinking/deleting resources to save money.
