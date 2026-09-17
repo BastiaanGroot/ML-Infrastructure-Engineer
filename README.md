@@ -16,7 +16,7 @@ workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
 
 ## Nebius MCP Server
 
-This repo has the [Nebius MCP Server](https://github.com/nebius/mcp-server) configured for Cursor (see `.cursor/mcp.json`, env in `.venv`), letting the agent query and manage Nebius Cloud resources directly — e.g. list/create compute instances, manage storage buckets, and look up available platforms.
+This repo has the [Nebius MCP Server](https://github.com/nebius/mcp-server) configured for Cursor (see `.cursor/mcp.json`, run via a self-contained `uvx` invocation — no local install needed), letting the agent query and manage Nebius Cloud resources directly — e.g. list/create compute instances, manage storage buckets, and look up available platforms.
 
 ## Design Choices
 

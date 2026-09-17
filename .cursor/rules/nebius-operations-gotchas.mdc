@@ -1,0 +1,21 @@
+---
+description: Operational gotchas for Nebius CLI/Terraform/Kubernetes learned in this project
+alwaysApply: true
+---
+
+# Nebius operations: known gotchas
+
+Hard-won lessons from working against the real `ml-infra-poc` project. Save time by checking here before re-debugging the same thing.
+
+- **Nebius CLI**: `NEBIUS_IAM_TOKEN` pollutes stdout with a `"token from ... is used"` line even in `--format json` output — always redirect to a file before parsing, never pipe straight to `jq`/`json.tool`. Strip the token itself of newlines/CR when capturing it (`tr -d '\n\r'`).
+- **Terraform provider auth**: the `service_account` block in `infra/versions.tf` needs real key files; for ad-hoc `plan`/`apply` with just a personal token via `NEBIUS_IAM_TOKEN`, comment it out temporarily and always restore it before committing.
+- **Gated resources**: pass `-var="enable_mlflow=true"` (etc.) on *every* `plan`/`apply` touching a flag-gated resource, or Terraform will plan to destroy it.
+- **Destructive-by-attribute-change resources**: e.g. `nebius_msp_mlflow_v1alpha1_cluster.public_access` forces full replacement (destroy+recreate, new ID/bucket) — no in-place update. Always check the plan for `-/+` before applying, confirm with the user first.
+- **SecretStash (`mysterybox`)**: a secret's `id` (e.g. `mbsec-...`) is a container, not the value — always retrieve via `payload get-by-key`. Soft-deleted secrets need `--show-scheduled-for-deletion` to even show up in `list`.
+- **kubectl on finished Jobs**: `kubectl exec` fails on terminated containers — use a short-lived debug pod with the same volume mounts instead.
+- **Platform-managed baseline addons** (`kube-system`/`observability` Helm releases installed automatically at cluster creation, e.g. `nebius-dcgm`, `cilium`, `node-problem-detector`) aren't ours — don't assume manual edits/deletes persist; verify live rather than trusting memory.
+- **GPU host metrics** come from the Observability Agent's own built-in `dcgmreceiver`, landing in the "Nebius Services" Prometheus datasource with an `instance_id` label — not "Nebius Monitoring", and not the separate (broken, unnecessary) in-cluster `nebius-dcgm` DaemonSet.
+- **Grafana `datasource`-type template variables** default to the alphabetically-first matching datasource, ignoring `isDefault` — always set an explicit `current` in dashboard JSON.
+- **HCL heredocs**: don't mix `<<-` dedenting with a `%{if~}` directive as the first line — use a plain left-flush `<<EOT` instead to avoid spurious diffs.
+- **GPU capacity on this tenant is generally tight** — even 1-GPU replacements can hit transient `NotEnoughResources`; usually self-resolves within tens of minutes via platform retries.
+- **No bucket-policy Terraform resource exists** in the installed `nebius/nebius` provider — granting a service account access to an Object Storage bucket (`storage.editor` etc.) is a one-time manual `nebius iam access-permit create` step, same pattern as other IAM grants not yet covered by the provider.

@@ -2,6 +2,12 @@
 # matching the PoC capacity. Requires the MPI Operator to be installed on
 # the cluster (https://github.com/kubeflow/mpi-operator).
 #
+# Written but never run (needs the MPI Operator + the future 8-GPU node
+# group + InfiniBand fabric - see the root README's "Future hardware:
+# 2x8-GPU nodes with InfiniBand"). The :v1 tag below is the same image used
+# by job-validate.yaml - untested against this manifest's mpirun/MPIJob
+# path specifically, so re-verify once the switch happens.
+#
 # This bypasses our image's default entrypoint (run.sh) and instead invokes
 # the bundled all_reduce_perf binary directly via mpirun, following the same
 # pattern as Nebius's own docs:
@@ -25,7 +31,7 @@ spec:
         spec:
           containers:
             - name: nccl-launcher
-              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:test
+              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v1
               command:
                 - /bin/bash
                 - -c
@@ -48,7 +54,7 @@ spec:
         spec:
           containers:
             - name: nccl-worker
-              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:test
+              image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v1
               resources:
                 limits:
                   nvidia.com/gpu: 8
