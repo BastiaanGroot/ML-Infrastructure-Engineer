@@ -42,7 +42,7 @@ A reference list of Nebius platform services, grouped by category, with notes on
 | Service                  | Description                                          | Relevant?                                                                                         |
 | ------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Serverless AI            | Endpoints/jobs for containerized AI workloads        | Alternative to self-managed inference server (Option 2) — worth comparing against a custom server |
-| MLflow clusters          | Managed experiment tracking / model registry         | Useful for Option 1 to log training efficiency across distribution-strategy experiments — created via [`infra/main.tf`](../infra/main.tf) behind `enable_mlflow` (see `infra/README.md` for the tracking endpoint and admin credential) |
+| MLflow clusters          | Managed experiment tracking / model registry         | **Actively used** by [`training/`](../training/) — both Option 1 distribution-strategy experiments (DP=2 vs TP=2 on Qwen3) logged throughput/memory/MFU here, see [`training/README.md#results`](../training/README.md#results). Created via [`infra/main.tf`](../infra/main.tf) behind `enable_mlflow` (see `infra/README.md` for the tracking endpoint and admin credential) |
 | Applications             | Turnkey apps: JupyterLab, **vLLM**, Open WebUI, etc. | vLLM app is directly relevant to Option 2 (inference server)                                      |
 | Third-party integrations | Tools to orchestrate AI workloads                    | Check for existing training/inference framework integrations before building custom               |
 
