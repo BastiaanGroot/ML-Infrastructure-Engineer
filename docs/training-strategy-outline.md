@@ -114,8 +114,11 @@ teach the most:
 
 1. **Baseline / Data Parallel** — Qwen3-1.7B (TP=1/PP=1), DP=2 across our two
    nodes.
-2. **Tensor Parallel** — Qwen3-4B with TP=2/PP=1 — our two single-GPU nodes
-   become one TP group instead of two DP replicas.
+2. **Tensor Parallel** — Qwen3-1.7B (same model as the DP baseline) with
+   TP=2/PP=1 — our two single-GPU nodes become one TP group instead of two
+   DP replicas. Using the same model as experiment 1 (rather than the
+   larger Qwen3-4B recipe row above) keeps this a single-variable
+   comparison: only `tensor_parallelism` differs between the two runs.
 
 Both ran successfully end-to-end and logged to MLflow — see
 [`training/README.md`](../training/README.md#results) for the implementation

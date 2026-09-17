@@ -1,10 +1,14 @@
-# Experiment 2: Qwen3-4B, Tensor Parallel (TP=2) across the same two 1-GPU
-# nodes. Uses Megatron-Bridge's qwen3_4b.pretrain_config() recipe with
-# tensor_parallelism=2 - our two single-GPU nodes become one TP group instead
-# of two DP replicas. Expect this to be markedly slower per step than
-# experiment 1 given there's no InfiniBand between these two nodes (see the
-# root README's "Future hardware" note) - TP requires an all-reduce on every
-# transformer layer's forward+backward, not once per step like DP.
+# Experiment 2: Qwen3-1.7B, Tensor Parallel (TP=2) across the same two 1-GPU
+# nodes. Uses Megatron-Bridge's qwen3_1p7b.pretrain_config() recipe with
+# tensor_parallelism=2 - the SAME model and recipe module as experiment-01's
+# DP=2 baseline, only tensor_parallelism differs (1 vs 2) - a deliberate
+# single-variable comparison (an earlier pass used Qwen3-4B here, which made
+# the two experiments harder to compare apples-to-apples; superseded).
+# Our two single-GPU nodes become one TP group instead of two DP replicas.
+# Expect this to be markedly slower per step than experiment 1 given there's
+# no InfiniBand between these two nodes (see the root README's "Future
+# hardware" note) - TP requires an all-reduce on every transformer layer's
+# forward+backward, not once per step like DP.
 #
 # Same "no custom image" + ConfigMap-mounted launch script + headless-Service
 # rendezvous approach as experiment-01. See ../README.md and
@@ -70,12 +74,12 @@ spec:
         - name: MICRO_BATCH_SIZE
           value: "2"
         - name: APPROX_NUM_PARAMS
-          value: "4e9"
+          value: "1.7e9"
         - name: MLFLOW_TRACKING_URI
           # From `terraform output mlflow_tracking_endpoint` (infra/README.md).
           value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
         - name: MLFLOW_RUN_NAME
-          value: tp-qwen3-4b-2gpu
+          value: tp-qwen3-1p7b-2gpu
       volumeMounts:
         - name: scripts
           mountPath: /scripts
@@ -92,7 +96,7 @@ spec:
           torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
             --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
             /scripts/run_experiment.py \
-            --model qwen3-4b --tensor-parallelism "$TENSOR_PARALLELISM" \
+            --model qwen3-1p7b --tensor-parallelism "$TENSOR_PARALLELISM" \
             --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
             --micro-batch-size "$MICRO_BATCH_SIZE" \
             --approx-num-params "$APPROX_NUM_PARAMS" \
@@ -149,11 +153,11 @@ spec:
         - name: MICRO_BATCH_SIZE
           value: "2"
         - name: APPROX_NUM_PARAMS
-          value: "4e9"
+          value: "1.7e9"
         - name: MLFLOW_TRACKING_URI
           value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
         - name: MLFLOW_RUN_NAME
-          value: tp-qwen3-4b-2gpu
+          value: tp-qwen3-1p7b-2gpu
       volumeMounts:
         - name: scripts
           mountPath: /scripts
@@ -170,7 +174,7 @@ spec:
           torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
             --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
             /scripts/run_experiment.py \
-            --model qwen3-4b --tensor-parallelism "$TENSOR_PARALLELISM" \
+            --model qwen3-1p7b --tensor-parallelism "$TENSOR_PARALLELISM" \
             --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
             --micro-batch-size "$MICRO_BATCH_SIZE" \
             --approx-num-params "$APPROX_NUM_PARAMS" \
