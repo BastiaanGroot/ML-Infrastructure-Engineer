@@ -1,0 +1,180 @@
+# Experiment 2: Qwen3-4B, Tensor Parallel (TP=2) across the same two 1-GPU
+# nodes. Uses Megatron-Bridge's qwen3_4b.pretrain_config() recipe with
+# tensor_parallelism=2 - our two single-GPU nodes become one TP group instead
+# of two DP replicas. Expect this to be markedly slower per step than
+# experiment 1 given there's no InfiniBand between these two nodes (see the
+# root README's "Future hardware" note) - TP requires an all-reduce on every
+# transformer layer's forward+backward, not once per step like DP.
+#
+# Same "no custom image" + ConfigMap-mounted launch script + headless-Service
+# rendezvous approach as experiment-01. See ../README.md and
+# ../../docs/training-strategy-outline.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-tp-headless
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: qwen3-tp-worker
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen3-tp-worker-0
+  namespace: default
+  labels:
+    app: qwen3-tp-worker
+spec:
+  hostname: qwen3-tp-worker-0
+  subdomain: qwen3-tp-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [qwen3-tp-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: qwen3-training-scripts
+    # PyTorch's DataLoader multiprocessing workers need real shared memory -
+    # the container default /dev/shm (64MB) isn't enough and fails with
+    # "OSError: [Errno 28] No space left on device" on the first batch.
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "0"
+        - name: MASTER_ADDR
+          value: qwen3-tp-worker-0.qwen3-tp-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: TENSOR_PARALLELISM
+          value: "2"
+        - name: MAX_STEPS
+          value: "20"
+        - name: GLOBAL_BATCH_SIZE
+          value: "2"
+        - name: MICRO_BATCH_SIZE
+          value: "2"
+        - name: APPROX_NUM_PARAMS
+          value: "4e9"
+        - name: MLFLOW_TRACKING_URI
+          # From `terraform output mlflow_tracking_endpoint` (infra/README.md).
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: tp-qwen3-4b-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: dshm
+          mountPath: /dev/shm
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          cd /opt/Megatron-Bridge
+          export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
+          echo "=== Qwen3 TP=2 - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/run_experiment.py \
+            --model qwen3-4b --tensor-parallelism "$TENSOR_PARALLELISM" \
+            --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
+            --micro-batch-size "$MICRO_BATCH_SIZE" \
+            --approx-num-params "$APPROX_NUM_PARAMS" \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen3-tp-worker-1
+  namespace: default
+  labels:
+    app: qwen3-tp-worker
+spec:
+  hostname: qwen3-tp-worker-1
+  subdomain: qwen3-tp-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [qwen3-tp-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: qwen3-training-scripts
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "1"
+        - name: MASTER_ADDR
+          value: qwen3-tp-worker-0.qwen3-tp-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: TENSOR_PARALLELISM
+          value: "2"
+        - name: MAX_STEPS
+          value: "20"
+        - name: GLOBAL_BATCH_SIZE
+          value: "2"
+        - name: MICRO_BATCH_SIZE
+          value: "2"
+        - name: APPROX_NUM_PARAMS
+          value: "4e9"
+        - name: MLFLOW_TRACKING_URI
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: tp-qwen3-4b-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: dshm
+          mountPath: /dev/shm
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          cd /opt/Megatron-Bridge
+          export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
+          echo "=== Qwen3 TP=2 - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/run_experiment.py \
+            --model qwen3-4b --tensor-parallelism "$TENSOR_PARALLELISM" \
+            --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
+            --micro-batch-size "$MICRO_BATCH_SIZE" \
+            --approx-num-params "$APPROX_NUM_PARAMS" \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
