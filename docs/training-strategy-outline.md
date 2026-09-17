@@ -85,6 +85,35 @@ Bolded rows are the two data points that matter most for this project: the
 below), and **Qwen3-235B-A22B is the real >100B target** the assignment
 references.
 
+## A note on H100 vs H200
+
+The table above is Megatron-Bridge's **H100** recipe set (see the file path
+above), while our PoC cluster runs **H200**s. This is intentional, not an
+oversight worth "fixing":
+
+- **Compute is identical.** H100 and H200 are the same GH100 die at the same
+  clocks - both peak at 989 TFLOP/s bf16 (dense, non-sparse) tensor-core
+  throughput per GPU. H200 changes nothing about achievable TFLOP/s or MFU.
+- **H200 is purely a memory upgrade**: 141GB HBM3e @ ~4.8TB/s vs H100's 80GB
+  HBM3 @ ~3.35TB/s - about 76% more capacity and 43% more bandwidth, same
+  compute.
+- The table is deliberately anchored to H100 because that's the customer's
+  **real target hardware** - the assignment's overview specifies a 512x
+  H100 deployment. Our 16x H200 PoC cluster is a capacity-matched stand-in
+  for validating the same parallelism strategies, not the production
+  target itself.
+- Practical consequence: because H200 has materially more VRAM per GPU, a
+  model that needs a given TP/PP degree to *fit* on 80GB H100s could
+  plausibly fit at a lower degree on our 141GB H200s (e.g. skip a PP stage
+  or drop TP from 4 to 2). But since compute is unchanged, the table's
+  per-GPU **throughput and MFU expectations transfer directly** to H200 -
+  only the memory-driven minimum parallelism degree might shrink, not the
+  achievable TFLOP/s ceiling. In our own [`training/`](../training/README.md#results)
+  runs this showed up directly: Qwen3-1.7B/4B comfortably fit in
+  33-65GB peak, far under even an H100's 80GB, so H200's extra headroom
+  wasn't a factor at this tiny scale - it will start to matter once models
+  approach the 32B+ tier in the table above.
+
 ## Sizing insight: what actually fits on the PoC's 16 GPUs
 
 This is the useful, honest takeaway for the client, not just a table:
