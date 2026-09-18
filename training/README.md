@@ -3,9 +3,9 @@
 Small-scale, real implementation of the design in
 [`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md) —
 single-variable experiments that fit exactly on the current live **2 nodes x
-1 GPU** cluster, comparing Data/Tensor/Pipeline Parallelism head-to-head,
-with results logged to the live MLflow tracking server. All completed
-successfully on the real cluster — see [Results](#results).
+1 GPU** cluster, comparing Data/Tensor/Pipeline/Context Parallelism
+head-to-head, with results logged to the live MLflow tracking server. All
+completed successfully on the real cluster — see [Results](#results).
 
 ## Container image: no custom Dockerfile
 
@@ -29,32 +29,41 @@ throughput/memory/MFU to MLflow itself via the plain `mlflow` client.
 
 ## Experiments
 
-All three use Megatron-Bridge's own Qwen3 recipe module unmodified (not
+All five runs use Megatron-Bridge's own Qwen3 recipe module unmodified (not
 hand-tuned configs) — see
 [`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md#recipe-table)
-for where these sit in the full size/strategy table. All three use synthetic
+for where these sit in the full size/strategy table. All five use synthetic
 (`mock=True`) data, a deliberate simplification (see the outline doc) — this
 measures parallelism/infra mechanics (throughput, memory, step time), not a
 trained checkpoint.
 
-| # | Manifest | Model | Recipe module | Strategy | GPUs |
-|---|---|---|---|---|---|
-| 1 | [`k8s/experiment-01-data-parallel.yaml`](k8s/experiment-01-data-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (TP=1/PP=1 x2 replicas) | 2 |
-| 2 | [`k8s/experiment-02-tensor-parallel.yaml`](k8s/experiment-02-tensor-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=2/PP=1 | 2 |
-| 3 | [`k8s/experiment-03-pipeline-parallel.yaml`](k8s/experiment-03-pipeline-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=1/PP=2 | 2 |
+| # | Manifest | Model | Recipe module | Strategy | Seq len | GPUs |
+|---|---|---|---|---|---|---|
+| 1 | [`k8s/experiment-01-data-parallel.yaml`](k8s/experiment-01-data-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (TP=1/PP=1 x2 replicas) | 4096 | 2 |
+| 2 | [`k8s/experiment-02-tensor-parallel.yaml`](k8s/experiment-02-tensor-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=2/PP=1 | 4096 | 2 |
+| 3 | [`k8s/experiment-03-pipeline-parallel.yaml`](k8s/experiment-03-pipeline-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=1/PP=2 | 4096 | 2 |
+| 4 | [`k8s/experiment-04-context-parallel.yaml`](k8s/experiment-04-context-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | CP=2 | 16384 | 2 |
+| 4b | [`k8s/experiment-04b-longseq-baseline.yaml`](k8s/experiment-04b-longseq-baseline.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (CP=1 baseline for #4) | 16384 | 2 |
 
-All three rows use the exact same model and recipe module - only the
-parallelism degree under test differs, so each is a genuine single-variable
-comparison against the DP=2 baseline. (An earlier pass ran experiment 2
-against Qwen3-4B instead; that made the two runs harder to compare
-apples-to-apples, so it was superseded by this matched-model rerun - see
-[Results](#results).) Experiment 3 uses `global_batch_size=4,
-micro_batch_size=1` (4 microbatches) instead of experiment 1/2's `4, 2` -
-PP=2 needs `num_microbatches >= pipeline_parallelism` or Megatron-Core's
-scheduler asserts, and 1 microbatch (what `4, 2` would give under PP=2's
-DP=1) doesn't clear that bar.
+All rows use the exact same model and recipe module - only the parallelism
+degree (and, for 4/4b, sequence length) under test differs, so each is a
+genuine single-variable comparison against its matched baseline. (An
+earlier pass ran experiment 2 against Qwen3-4B instead; that made the two
+runs harder to compare apples-to-apples, so it was superseded by this
+matched-model rerun - see [Results](#results).) Experiment 3 uses
+`global_batch_size=4, micro_batch_size=1` (4 microbatches) instead of
+experiment 1/2's `4, 2` - PP=2 needs `num_microbatches >= pipeline_parallelism`
+or Megatron-Core's scheduler asserts, and 1 microbatch (what `4, 2` would
+give under PP=2's DP=1) doesn't clear that bar. Experiments 4/4b compare CP
+against a **matched long-sequence DP baseline** (not experiment 1's
+4096-seq baseline) so only `context_parallelism` differs - comparing CP
+straight to experiment 1 would confound "CP vs DP" with "long vs short
+sequence". Both 4/4b also need a larger `dshm` `emptyDir` (8Gi vs 2Gi
+elsewhere) - the 4x longer sequence means 4x bigger batches through
+PyTorch's DataLoader workers, which otherwise die with a shared-memory
+"Bus error".
 
-All three manifests define a headless `Service` + 2 plain `Pod`s (rank 0 /
+All manifests define a headless `Service` + 2 plain `Pod`s (rank 0 /
 rank 1) running `torchrun` directly — deliberately **no new operator**
 (avoids
 repeating the still-unresolved MPI-Operator gap noted in
@@ -71,7 +80,7 @@ otherwise.
 Global/micro batch sizes are set per-experiment (no gradient accumulation
 where avoidable) rather than the recipes' out-of-the-box (larger) defaults -
 see the note above on why experiment 3's batch sizing differs from 1/2's.
-All three also override the recipe's default 500-iteration LR warmup down to
+All five also override the recipe's default 500-iteration LR warmup down to
 0, since this is a 20-iteration mechanism demo, not a real convergence run.
 
 ## Running
@@ -103,6 +112,16 @@ kubectl delete -f k8s/experiment-02-tensor-parallel.yaml
 kubectl apply -f k8s/experiment-03-pipeline-parallel.yaml
 kubectl logs -f qwen3-pp-worker-0
 kubectl delete -f k8s/experiment-03-pipeline-parallel.yaml
+
+# Experiment 4 (CP=2, seq=16384) - same 2-GPU constraint:
+kubectl apply -f k8s/experiment-04-context-parallel.yaml
+kubectl logs -f qwen3-cp-worker-0
+kubectl delete -f k8s/experiment-04-context-parallel.yaml
+
+# Experiment 4b (DP=2 long-seq baseline for #4) - same 2-GPU constraint:
+kubectl apply -f k8s/experiment-04b-longseq-baseline.yaml
+kubectl logs -f qwen3-dplong-worker-0
+kubectl delete -f k8s/experiment-04b-longseq-baseline.yaml
 ```
 
 First run on each node pulls the ~19GB `nemo` image (one-time per node,
@@ -113,16 +132,19 @@ needed).
 
 ## Results
 
-All three experiments ran successfully end-to-end (20 iterations +
-train/valid/test eval) on the live 2-node cluster and logged to MLflow:
+All five runs (experiments 1-4 plus 4b) ran successfully end-to-end (20
+iterations + train/valid/test eval) on the live 2-node cluster and logged to
+MLflow:
 [`dp-baseline-qwen3-1p7b`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/14a3393a0c63406a9487453d382eff50),
 [`tp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/0aa09cd060a940dfadee442e327ea18d),
+[`pp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/02bd574d2db94f018047f503c7a2db80),
+[`cp-qwen3-1p7b-2gpu-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/167b0ae1dbb243e79e044406bfc70638),
 and
-[`pp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/02bd574d2db94f018047f503c7a2db80)
+[`dp-longseq-baseline-qwen3-1p7b-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/65123a0219e049a795e1c867d1c78a42)
 under the `qwen3-parallelism-experiments` experiment (link requires the
-MLflow admin credentials above). Same model, same recipe module, only the
-parallelism degree under test differs across the three - a clean
-single-variable comparison.
+MLflow admin credentials above). Same model, same recipe module throughout -
+only the parallelism degree (and, for 4/4b, sequence length) under test
+differs - a clean single-variable comparison in each case.
 
 > An earlier pass ran experiment 2 against Qwen3-4B instead of Qwen3-1.7B,
 > which confounded "TP vs DP" with "bigger vs smaller model". That run
@@ -222,6 +244,38 @@ longer fits on one GPU, consistent with the outline doc's framing that
 today's 2-GPU cluster is far below where 3D parallelism becomes
 memory-necessary rather than throughput-optional.
 
+### Context Parallel (CP=2) vs a matched long-sequence DP=2 baseline
+
+Experiment 4 (CP=2) and 4b (DP=2, CP=1) both run Qwen3-1.7B at
+`seq_length=16384` (4x experiments 1-3's 4096) - only `context_parallelism`
+differs, so this isolates CP's effect cleanly:
+
+| Steady-state metric (iters 2-20 avg, seq=16384) | DP=2 (CP=1, exp. 4b) | CP=2 (exp. 4) |
+|---|---|---|
+| Step time | 2.43s | 2.74s |
+| Throughput per GPU | 107.6 TFLOP/s | 47.7 TFLOP/s |
+| MFU (vs H200 989 TFLOP/s bf16 peak) | 10.88% | 4.83% |
+| **Peak GPU memory** | **85.1 GB** | **53.3 GB** |
+
+**Takeaway 3 (CP trades throughput for memory, like TP does)**: CP=2 is
+**~56% less FLOP-efficient per GPU** than the long-sequence DP=2 baseline
+(47.7 vs 107.6 TFLOP/s/GPU) - each GPU now has to exchange KV chunks with
+its ring-attention partner across the same no-InfiniBand link that hurt
+TP=2 earlier, and for a similar reason (attention's per-chunk communication
+happens on the critical path of every layer's forward+backward). In
+exchange, CP=2 needs **~37% less peak GPU memory** (53.3GB vs 85.1GB) -
+each GPU only ever materializes activations for half the 16384-token
+sequence instead of the full thing. This is the same memory-vs-throughput
+trade-off TP showed earlier, just sharding the *sequence* axis instead of a
+layer's internals - and it's the trade-off that matters in practice: at
+sequences long enough that a single GPU's activations alone would OOM (the
+whole reason CP exists), DP's "just replicate the model" strategy isn't an
+option at all, regardless of its throughput advantage here. Both peak
+memory figures also confirm this setup was nowhere near that regime yet -
+even the 85.1GB DP baseline fits comfortably inside an H200's 143GB - so
+this result demonstrates the *mechanism* and its trade-off, not a case
+where CP was strictly necessary.
+
 ## Deferred / stretch goals
 
 Not attempted in this pass — see
@@ -229,4 +283,3 @@ Not attempted in this pass — see
 for the reasoning:
 
 - **Expert Parallelism** (Qwen3-30B-A3B, EP=2) — recipe exists, not yet run.
-- **Context Parallelism** (CP=2, long sequence) — recipe exists, not yet run.

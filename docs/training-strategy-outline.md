@@ -153,12 +153,20 @@ module so only the parallelism degree under test changes each time:
    nodes now hold different halves of the model's layers instead of a full
    replica (DP) or a sharded layer (TP). Global/micro batch sizes are chosen
    so there are enough microbatches (4) to actually pipeline given PP=2.
+4. **Context Parallel** — Qwen3-1.7B, CP=2, at a 4x longer sequence
+   (16384 vs the 4096 used above) - CP shards the *sequence* dimension
+   instead of layers (PP) or a layer's internals (TP). Compared against a
+   matched **DP=2 long-sequence baseline** (CP=1, same 16384 seq_length) so
+   only `context_parallelism` differs - comparing straight to experiment 1's
+   4096-seq DP baseline would confound "CP vs DP" with "long vs short
+   sequence".
 
-All three ran successfully end-to-end and logged to MLflow — see
+All four ran successfully end-to-end and logged to MLflow — see
 [`training/README.md`](../training/README.md#results) for the implementation
 and results, including a real (if modest, at this scale) measured slowdown
-from running TP across nodes without InfiniBand, and a more surprising
-result for PP (see the README's takeaway on communication volume).
+from running TP across nodes without InfiniBand, a more surprising result
+for PP (see the README's takeaway on communication volume), and a clean
+memory-vs-throughput trade-off for CP at long sequence length.
 
 *Note*: the exact NVIDIA-named convenience recipes in the table above
 (`qwen3_1p7b_pretrain_1gpu_h100_bf16_config` etc.) come from a newer
@@ -177,8 +185,6 @@ deferred elsewhere in this repo:
 - **Expert Parallelism** (Qwen3-30B-A3B, EP=2 override) — mechanically
   possible on 2 GPUs (the recipe exists above) but adds real memory/scope
   risk for a first pass; written up here, not yet run.
-- **Context Parallelism** (CP=2, long sequence) — same treatment; the
-  600M/YaRN-128K SFT recipe above is the reference once CP is attempted.
 
 ## References
 
