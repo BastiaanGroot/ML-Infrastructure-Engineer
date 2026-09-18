@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Cross-node NCCL all_reduce bandwidth sweep.
+
+Every TP/PP/CP takeaway in ../README.md refers qualitatively to "no
+InfiniBand hurts cross-node communication" - this script measures that
+directly instead of just asserting it: real GB/s for torch.distributed
+all_reduce(SUM) across the same two live compute nodes the training
+experiments run on, standard cloud Ethernet (no InfiniBand), swept across
+message sizes from 1 MiB to 1 GiB.
+
+Pure torch.distributed + NCCL - doesn't touch Megatron-Bridge or the model
+at all. Launched the same way as run_experiment.py (torchrun --nnodes=2
+--nproc-per-node=1) so it reuses the same headless-Service rendezvous setup
+as every other experiment - see ../k8s/experiment-09-nccl-bandwidth.yaml
+and ../README.md.
+
+For each size: warmup iters (untimed, lets NCCL pick/cache its algorithm),
+then timed iters wrapped in torch.cuda.synchronize() + a dist.barrier()
+before/after so both ranks start and stop together and we're timing the
+collective itself, not queuing or rendezvous overhead.
+
+Reports "algorithm bandwidth" (nccl-tests terminology): bytes moved / time,
+in GB/s (decimal, i.e. 1e9 bytes/s - NCCL's own convention). For a 2-rank
+all_reduce specifically, nccl-tests' other column ("bus bandwidth", which
+accounts for the ring algorithm's 2*(n-1)/n data-movement multiplier over N
+ranks) is numerically identical to algbw since 2*(2-1)/2 == 1 - so there's
+only one meaningful number to report here, not two.
+"""
+
+import argparse
+import json
+import os
+import time
+
+import torch
+import torch.distributed as dist
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--sizes-mb",
+        type=str,
+        default="1,4,16,64,256,1024",
+        help="Comma-separated message sizes in MiB to sweep.",
+    )
+    parser.add_argument("--warmup-iters", type=int, default=5)
+    parser.add_argument("--timed-iters", type=int, default=20)
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Optional path to write the results JSON (rank 0 only).",
+    )
+    parser.add_argument(
+        "--mlflow-run-name", type=str, default=None,
+        help="If set (and MLFLOW_TRACKING_URI is in the env), log results "
+        "to MLflow as metrics keyed on size_mb as the step.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl")
+
+    mlflow_run = None
+    if rank == 0 and args.mlflow_run_name and os.environ.get("MLFLOW_TRACKING_URI"):
+        import mlflow
+
+        mlflow.set_experiment("qwen3-parallelism-experiments")
+        mlflow_run = mlflow.start_run(run_name=args.mlflow_run_name)
+        mlflow.log_params(
+            {
+                "sweep_type": "nccl_allreduce_bandwidth",
+                "world_size": os.environ["WORLD_SIZE"],
+                "warmup_iters": args.warmup_iters,
+                "timed_iters": args.timed_iters,
+            }
+        )
+
+    results = []
+    for size_mb in (int(x) for x in args.sizes_mb.split(",")):
+        n_elems = (size_mb * 1024 * 1024) // 4  # fp32 elements
+        tensor = torch.randn(n_elems, device="cuda", dtype=torch.float32)
+        dist.barrier()
+
+        for _ in range(args.warmup_iters):
+            dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        torch.cuda.synchronize()
+        dist.barrier()
+
+        start = time.perf_counter()
+        for _ in range(args.timed_iters):
+            dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start
+
+        avg_time_sec = elapsed / args.timed_iters
+        bytes_moved = n_elems * 4
+        algbw_gbps = (bytes_moved / avg_time_sec) / 1e9
+
+        if rank == 0:
+            print(
+                f"size={size_mb:>5} MiB  avg_time={avg_time_sec * 1e3:8.3f} ms  "
+                f"algbw={algbw_gbps:7.2f} GB/s"
+            )
+            results.append(
+                {
+                    "size_mb": size_mb,
+                    "avg_time_ms": avg_time_sec * 1e3,
+                    "algbw_gbps": algbw_gbps,
+                }
+            )
+            if mlflow_run is not None:
+                import mlflow
+
+                mlflow.log_metric("algbw_gbps", algbw_gbps, step=size_mb)
+                mlflow.log_metric("avg_time_ms", avg_time_sec * 1e3, step=size_mb)
+
+    if rank == 0 and args.output:
+        with open(args.output, "w") as f:
+            json.dump(results, f, indent=2)
+
+    if mlflow_run is not None:
+        import mlflow
+
+        mlflow.end_run()
+
+    dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()

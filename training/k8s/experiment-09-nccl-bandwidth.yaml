@@ -1,0 +1,134 @@
+# Experiment 9: cross-node NCCL all_reduce bandwidth sweep across the same
+# two live 1-GPU nodes the training experiments run on - standard cloud
+# Ethernet, no InfiniBand. Pure torch.distributed, no Megatron-Bridge/model
+# involved - see ../scripts/nccl_bandwidth_sweep.py for the full mechanism.
+#
+# Every TP/PP/CP takeaway elsewhere in ../README.md attributes a measured
+# slowdown/speedup to "no InfiniBand" qualitatively; this gives that claim
+# an actual GB/s number instead of just asserting it.
+#
+# Same "no custom image" + ConfigMap-mounted script + headless-Service
+# rendezvous approach as the other experiments, but mounts the
+# nccl-bandwidth-script ConfigMap (apply ./nccl-bandwidth-configmap.yaml
+# first) instead of qwen3-training-scripts. See ../README.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-bw-headless
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: nccl-bw-worker
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-bw-worker-0
+  namespace: default
+  labels:
+    app: nccl-bw-worker
+spec:
+  hostname: nccl-bw-worker-0
+  subdomain: nccl-bw-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [nccl-bw-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: nccl-bandwidth-script
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "0"
+        - name: MASTER_ADDR
+          value: nccl-bw-worker-0.nccl-bw-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: MLFLOW_TRACKING_URI
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: nccl-allreduce-bandwidth-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          echo "=== NCCL bandwidth sweep - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/nccl_bandwidth_sweep.py \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-bw-worker-1
+  namespace: default
+  labels:
+    app: nccl-bw-worker
+spec:
+  hostname: nccl-bw-worker-1
+  subdomain: nccl-bw-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [nccl-bw-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: nccl-bandwidth-script
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "1"
+        - name: MASTER_ADDR
+          value: nccl-bw-worker-0.nccl-bw-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: MLFLOW_TRACKING_URI
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: nccl-allreduce-bandwidth-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          echo "=== NCCL bandwidth sweep - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/nccl_bandwidth_sweep.py \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1

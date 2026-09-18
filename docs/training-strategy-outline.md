@@ -181,8 +181,13 @@ against the same DP=2/Qwen3-1.7B baseline cover that:
    fused/FlashAttention kernel, to make the custom-kernel effect measurable.
 8. **CPU offload** — same baseline, `--cpu-offload` (activation CPU
    offloading for all-but-one layer).
+9. **NCCL bandwidth sweep** — no model at all, just a direct
+   `torch.distributed.all_reduce` sweep across the same two nodes at
+   message sizes from 1 MiB to 1 GiB, to put a real GB/s number behind the
+   "no InfiniBand" explanation used throughout the other experiments'
+   write-ups rather than leaving it as an assumption.
 
-Experiments 1-4 and 6-8 ran successfully end-to-end and logged to MLflow —
+Experiments 1-4 and 6-9 ran successfully end-to-end and logged to MLflow —
 see [`training/README.md`](../training/README.md#results) for the
 implementation and results, including a real (if modest, at this scale)
 measured slowdown from running TP across nodes without InfiniBand, a more

@@ -50,6 +50,7 @@ trained checkpoint.
 | 6 | [`k8s/experiment-06-fp8.yaml`](k8s/experiment-06-fp8.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, FP8 precision (baseline for #1 is BF16) | 4096 | 2 |
 | 7 | [`k8s/experiment-07-attention-backend.yaml`](k8s/experiment-07-attention-backend.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, unfused attention (baseline for #1 is fused/auto) | 4096 | 2 |
 | 8 | [`k8s/experiment-08-cpu-offload.yaml`](k8s/experiment-08-cpu-offload.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, activation CPU offload (baseline for #1 has it off) | 4096 | 2 |
+| 9 | [`k8s/experiment-09-nccl-bandwidth.yaml`](k8s/experiment-09-nccl-bandwidth.yaml) | n/a (no model) | n/a — pure `torch.distributed` | Cross-node NCCL `all_reduce` bandwidth sweep, 1 MiB-1 GiB | n/a | 2 |
 
 All rows use the exact same model and recipe module - only the parallelism
 degree (and, for 4/4b, sequence length) under test differs, so each is a
@@ -70,7 +71,13 @@ PyTorch's DataLoader workers, which otherwise die with a shared-memory
 "Bus error". Experiments 6-8 are each a single flag away from experiment 1's
 exact baseline (`--precision`, `--attention-backend`, `--cpu-offload`
 respectively) - the cleanest possible single-variable comparisons in this
-set.
+set. Experiment 9 is the odd one out - it doesn't train anything, just
+measures raw cross-node `all_reduce` bandwidth with
+[`scripts/nccl_bandwidth_sweep.py`](scripts/nccl_bandwidth_sweep.py)
+(mounted from its own `nccl-bandwidth-script` ConfigMap,
+`k8s/nccl-bandwidth-configmap.yaml`, not `qwen3-training-scripts`) - a real
+number behind the "no InfiniBand" explanation used throughout the TP/PP/CP
+takeaways above.
 
 All manifests define a headless `Service` + 2 plain `Pod`s (rank 0 /
 rank 1) running `torchrun` directly — deliberately **no new operator**
@@ -152,6 +159,12 @@ kubectl delete -f k8s/experiment-07-attention-backend.yaml
 kubectl apply -f k8s/experiment-08-cpu-offload.yaml
 kubectl logs -f qwen3-offload-worker-0
 kubectl delete -f k8s/experiment-08-cpu-offload.yaml
+
+# Experiment 9 (NCCL bandwidth sweep) - different ConfigMap, no model:
+kubectl apply -f k8s/nccl-bandwidth-configmap.yaml
+kubectl apply -f k8s/experiment-09-nccl-bandwidth.yaml
+kubectl logs -f nccl-bw-worker-0
+kubectl delete -f k8s/experiment-09-nccl-bandwidth.yaml
 ```
 
 First run on each node pulls the ~19GB `nemo` image (one-time per node,
@@ -162,9 +175,11 @@ needed).
 
 ## Results
 
-Seven of the eight runs (experiments 1-4, 4b, and 6-8) ran successfully
-end-to-end (20 iterations + train/valid/test eval) on the live 2-node
-cluster and logged to MLflow:
+Eight of the nine runs (experiments 1-4, 4b, and 6-9) ran successfully
+end-to-end on the live 2-node cluster and logged to MLflow. Experiments
+1-4, 4b, and 6-8 each ran 20 training iterations + train/valid/test eval;
+experiment 9 (bandwidth sweep) doesn't train, it just measures
+`all_reduce` time. Logged runs:
 [`dp-baseline-qwen3-1p7b`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/14a3393a0c63406a9487453d382eff50),
 [`tp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/0aa09cd060a940dfadee442e327ea18d),
 [`pp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/02bd574d2db94f018047f503c7a2db80),
@@ -172,8 +187,9 @@ cluster and logged to MLflow:
 [`dp-longseq-baseline-qwen3-1p7b-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/65123a0219e049a795e1c867d1c78a42),
 [`fp8-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/38a8c403b6e04462a5985d7f8c3a9312),
 [`unfused-attn-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/bc376002cdba4cb09c40bf61113f97b6),
+[`cpu-offload-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/3fd91e0b292a454da1198221ccd85571),
 and
-[`cpu-offload-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/3fd91e0b292a454da1198221ccd85571)
+[`nccl-allreduce-bandwidth-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/017032ab07314753bc71c0d9d59b6cef)
 under the `qwen3-parallelism-experiments` experiment (link requires the
 MLflow admin credentials above). Same model, same recipe module throughout -
 only the one flag under test differs from its matched baseline each time -
@@ -427,3 +443,35 @@ CPU-GPU interconnect, PCIe bandwidth would eventually saturate and this
 trade-off would look more like TP/PP/CP's - real throughput cost for real
 memory savings. This result demonstrates the mechanism working correctly,
 not a claim that offloading is costless at any scale.
+
+### Cross-node NCCL bandwidth - the real number behind "no InfiniBand"
+
+Experiment 9 measured actual `torch.distributed.all_reduce(SUM)` bandwidth
+between the same two nodes, at message sizes from 1 MiB to 1 GiB (20 timed
+iterations each, after 5 warmup iterations):
+
+| Message size | Avg time | Algorithm bandwidth |
+|---|---|---|
+| 1 MiB | 0.86 ms | 1.22 GB/s |
+| 4 MiB | 2.05 ms | 2.05 GB/s |
+| 16 MiB | 7.14 ms | 2.35 GB/s |
+| 64 MiB | 27.86 ms | 2.41 GB/s |
+| 256 MiB | 117.91 ms | 2.28 GB/s |
+| 1024 MiB | 456.31 ms | 2.35 GB/s |
+
+**Takeaway 8 (a real ceiling, not a guess)**: bandwidth ramps up with
+message size (NCCL needs enough data in flight to hide fixed per-call
+latency) and then plateaus around **~2.3-2.4 GB/s** (≈18-19 Gbps) from 16
+MiB onward - a believable number for a standard cloud NIC over plain
+Ethernet/sockets (no RDMA, no InfiniBand), and a small fraction of what
+InfiniBand (typically 200+ Gbps) or intra-node NVLink (900+ GB/s) would
+give the same collective. This is the concrete number behind every "no
+InfiniBand hurt TP/PP" statement made in the takeaways above - TP=2 and
+PP=2 both issue collectives (all-reduces for TP, point-to-point
+activation sends for PP) over exactly this link on every layer of every
+microbatch, so a ~2.3 GB/s ceiling on a link that a 100B+ model's
+per-layer activations/gradients need to cross repeatedly is directly why
+those experiments were communication-bound rather than compute-bound at
+this scale - and exactly the gap real InfiniBand closes for the target
+512x H100 deployment (see `docs/training-strategy-outline.md`'s H100 vs
+H200 note).
