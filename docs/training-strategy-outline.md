@@ -138,8 +138,9 @@ This is the useful, honest takeaway for the client, not just a table:
 The live cluster has **2 nodes x 1 GPU each** (2 GPUs total, no
 InfiniBand — see the root README's "Future hardware" note). That's below
 even the smallest multi-GPU recipe above, so the real, small-scale
-implementation deliberately picks the two experiments that fit exactly and
-teach the most:
+implementation deliberately picks single-variable experiments that fit
+exactly and teach the most, all using the same Qwen3-1.7B model/recipe
+module so only the parallelism degree under test changes each time:
 
 1. **Baseline / Data Parallel** — Qwen3-1.7B (TP=1/PP=1), DP=2 across our two
    nodes.
@@ -148,11 +149,16 @@ teach the most:
    DP replicas. Using the same model as experiment 1 (rather than the
    larger Qwen3-4B recipe row above) keeps this a single-variable
    comparison: only `tensor_parallelism` differs between the two runs.
+3. **Pipeline Parallel** — Qwen3-1.7B (same model again), TP=1/PP=2 — the two
+   nodes now hold different halves of the model's layers instead of a full
+   replica (DP) or a sharded layer (TP). Global/micro batch sizes are chosen
+   so there are enough microbatches (4) to actually pipeline given PP=2.
 
-Both ran successfully end-to-end and logged to MLflow — see
+All three ran successfully end-to-end and logged to MLflow — see
 [`training/README.md`](../training/README.md#results) for the implementation
 and results, including a real (if modest, at this scale) measured slowdown
-from running TP across nodes without InfiniBand.
+from running TP across nodes without InfiniBand, and a more surprising
+result for PP (see the README's takeaway on communication volume).
 
 *Note*: the exact NVIDIA-named convenience recipes in the table above
 (`qwen3_1p7b_pretrain_1gpu_h100_bf16_config` etc.) come from a newer
@@ -173,8 +179,6 @@ deferred elsewhere in this repo:
   risk for a first pass; written up here, not yet run.
 - **Context Parallelism** (CP=2, long sequence) — same treatment; the
   600M/YaRN-128K SFT recipe above is the reference once CP is attempted.
-- Pipeline Parallelism at PP>1 similarly isn't exercised — our 2 GPus are
-  fully spent on the DP and TP experiments above.
 
 ## References
 
