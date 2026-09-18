@@ -101,6 +101,11 @@ def main() -> None:
         tensor_parallelism=args.tensor_parallelism,
         pipeline_parallelism=args.pipeline_parallelism,
         context_parallelism=args.context_parallelism,
+        # Sequence parallelism requires tensor_parallelism > 1 (Megatron-Core
+        # asserts otherwise) - the qwen3_30b_a3b MoE recipe defaults this to
+        # True even at tensor_parallelism=1, so override it explicitly here
+        # rather than relying on each recipe's default.
+        sequence_parallelism=args.tensor_parallelism > 1,
         train_iters=args.train_iters,
         global_batch_size=args.global_batch_size,
         micro_batch_size=args.micro_batch_size,

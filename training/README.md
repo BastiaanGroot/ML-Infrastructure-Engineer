@@ -3,9 +3,11 @@
 Small-scale, real implementation of the design in
 [`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md) —
 single-variable experiments that fit exactly on the current live **2 nodes x
-1 GPU** cluster, comparing Data/Tensor/Pipeline/Context Parallelism
+1 GPU** cluster, comparing Data/Tensor/Pipeline/Context/Expert Parallelism
 head-to-head, with results logged to the live MLflow tracking server. All
-completed successfully on the real cluster — see [Results](#results).
+ran on the real cluster and produced a documented result — see
+[Results](#results) (Expert Parallelism's result is a confirmed OOM, not a
+success, but that's still a real, evidenced answer).
 
 ## Container image: no custom Dockerfile
 
@@ -44,6 +46,7 @@ trained checkpoint.
 | 3 | [`k8s/experiment-03-pipeline-parallel.yaml`](k8s/experiment-03-pipeline-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=1/PP=2 | 4096 | 2 |
 | 4 | [`k8s/experiment-04-context-parallel.yaml`](k8s/experiment-04-context-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | CP=2 | 16384 | 2 |
 | 4b | [`k8s/experiment-04b-longseq-baseline.yaml`](k8s/experiment-04b-longseq-baseline.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (CP=1 baseline for #4) | 16384 | 2 |
+| 5 | [`k8s/experiment-05-expert-parallel.yaml`](k8s/experiment-05-expert-parallel.yaml) | Qwen3-30B-A3B (MoE) | `megatron.bridge.recipes.qwen.qwen3_30b_a3b` | EP=2 (stretch, **OOMs** - see Results) | 4096 | 2 |
 
 All rows use the exact same model and recipe module - only the parallelism
 degree (and, for 4/4b, sequence length) under test differs, so each is a
@@ -122,6 +125,12 @@ kubectl delete -f k8s/experiment-04-context-parallel.yaml
 kubectl apply -f k8s/experiment-04b-longseq-baseline.yaml
 kubectl logs -f qwen3-dplong-worker-0
 kubectl delete -f k8s/experiment-04b-longseq-baseline.yaml
+
+# Experiment 5 (EP=2, stretch) - confirmed OOMs, see Results below; kept
+# runnable so the failure is reproducible, not just asserted:
+kubectl apply -f k8s/experiment-05-expert-parallel.yaml
+kubectl logs -f qwen3-ep-worker-0
+kubectl delete -f k8s/experiment-05-expert-parallel.yaml
 ```
 
 First run on each node pulls the ~19GB `nemo` image (one-time per node,
@@ -144,7 +153,9 @@ and
 under the `qwen3-parallelism-experiments` experiment (link requires the
 MLflow admin credentials above). Same model, same recipe module throughout -
 only the parallelism degree (and, for 4/4b, sequence length) under test
-differs - a clean single-variable comparison in each case.
+differs - a clean single-variable comparison in each case. Experiment 5
+(EP=2) OOMs before reaching the MLflow logging call - see its own section
+below for the (still real, still documented) result.
 
 > An earlier pass ran experiment 2 against Qwen3-4B instead of Qwen3-1.7B,
 > which confounded "TP vs DP" with "bigger vs smaller model". That run
@@ -276,10 +287,57 @@ even the 85.1GB DP baseline fits comfortably inside an H200's 143GB - so
 this result demonstrates the *mechanism* and its trade-off, not a case
 where CP was strictly necessary.
 
-## Deferred / stretch goals
+### Expert Parallel (EP=2) - confirmed infeasible on 2 GPUs
 
-Not attempted in this pass — see
-[`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md#deferred--stretch-not-attempted-this-pass)
-for the reasoning:
+Experiment 5 runs Qwen3-30B-A3B (128 experts, ~30B total / ~3B
+active-per-token) with `expert_parallelism=2, tensor_parallelism=1,
+pipeline_parallelism=1`. Unlike TP/PP/CP, EP doesn't consume a separate
+dimension of `total_GPUs = TP x PP x CP x DP` - it shards *within* the DP
+dimension for MoE layers, so `world_size=2` here gives `data_parallel_size=2`
+(not 1), which is why `global_batch_size=2` (the minimum satisfying
+`global_batch_size % (micro_batch_size x data_parallel_size) == 0`).
 
-- **Expert Parallelism** (Qwen3-30B-A3B, EP=2) — recipe exists, not yet run.
+A back-of-envelope check before running it: with EP=2, each GPU ends up
+holding roughly half of the ~29B MoE-expert parameters (no further
+redundancy to shard away, since EP already equals the full DP group here)
+plus a full replica of the ~1.4B non-expert (attention/embedding)
+parameters - about **16B params/GPU**. Standard mixed-precision Adam needs
+roughly 16 bytes/param without further sharding opportunity for that
+expert shard (bf16 param + bf16 grad + fp32 master/momentum/variance) -
+**~256GB**, about 1.8x an H200's 143GB HBM, before even counting
+activations.
+
+Ran anyway to get a real answer instead of just the estimate. It confirmed
+almost exactly:
+
+```
+> number of parameters on (tensor, pipeline) model parallel rank (0, 0): 16036608000
+
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 12.00 MiB.
+GPU 0 has a total capacity of 139.80 GiB of which 9.12 MiB is free.
+Including non-PyTorch memory, this process has 139.78 GiB memory in use.
+```
+
+**16.04B params/GPU** - within 1% of the back-of-envelope estimate - and the
+OOM hit *while constructing the distributed optimizer's fp32 master
+parameter shards* (`distrib_optimizer.py`'s `shard_model_param.clone().float()`),
+before a single training step ran. Two smaller, earlier config errors were
+hit and fixed en route (documented for completeness, not hidden): the MoE
+recipe defaults `sequence_parallelism=True`, which asserts unless
+`tensor_parallelism > 1` (fixed in [`run_experiment.py`](scripts/run_experiment.py)
+by only enabling it when `tensor_parallelism > 1`); and the
+`data_parallel_size=2` point above, which needed `global_batch_size=2` not
+`1`.
+
+**Takeaway 4 (a real scale limit, not a tuning problem)**: this isn't a
+case where a different batch size or precision setting would fix it - the
+model's expert weights alone (before any activation memory) need ~1.8x
+more HBM than a single H200 has, at this parallelism degree. The fix is
+more GPUs (a real 2x8 cluster could push `expert_parallelism` to 8, halving
+the per-GPU expert share again, or add pipeline parallelism to split
+experts by layer too) or optimizer-state CPU offloading (this repo already
+exposes `--cpu-offload` for activations - Megatron-Core also has a
+`optimizer_cpu_offload` field on `OptimizerConfig` for exactly this, which
+would move the fp32 master/momentum/variance states to host RAM; not
+attempted here to keep this pass focused, but a plausible next step for
+scaling EP further without more GPUs).

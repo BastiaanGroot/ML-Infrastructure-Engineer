@@ -1,0 +1,190 @@
+# Experiment 5 (stretch, confirmed infeasible on 2 GPUs - see ../README.md):
+# Qwen3-30B-A3B MoE, Expert Parallel (EP=2) across the same two 1-GPU nodes.
+# Uses megatron.bridge.recipes.qwen.qwen3_30b_a3b.pretrain_config() with
+# expert_parallelism=2, tensor_parallelism=1, pipeline_parallelism=1 (which
+# makes data_parallelism=2 here, since EP shards *within* the DP dimension
+# for MoE layers rather than consuming a separate one - hence
+# global_batch_size=2 below, the minimum divisible by micro_batch_size(1) x
+# data_parallel_size(2)).
+#
+# Included specifically to demonstrate a real hardware/scale limit rather
+# than skip it silently: a back-of-envelope check (128 experts, ~29B of the
+# 30B total params live in MoE FFN layers, ~14.5B/GPU after EP=2 sharding,
+# no further redundancy to shard away since EP already equals DP here)
+# predicted ~16B params/GPU needing ~16 bytes/param under standard
+# mixed-precision Adam (no distributed-optimizer benefit for the
+# non-redundant expert shard) - about 256GB, ~1.8x an H200's 143GB. This
+# matched what actually happened: confirmed real
+# `torch.OutOfMemoryError` while constructing the optimizer's fp32 master
+# parameter shards, before a single training step - see ../README.md's
+# Results section for the exact error and params-per-rank count.
+#
+# Same "no custom image" + ConfigMap-mounted launch script + headless-Service
+# rendezvous approach as the other experiments. See ../README.md and
+# ../../docs/training-strategy-outline.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-ep-headless
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: qwen3-ep-worker
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen3-ep-worker-0
+  namespace: default
+  labels:
+    app: qwen3-ep-worker
+spec:
+  hostname: qwen3-ep-worker-0
+  subdomain: qwen3-ep-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [qwen3-ep-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: qwen3-training-scripts
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "0"
+        - name: MASTER_ADDR
+          value: qwen3-ep-worker-0.qwen3-ep-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: EXPERT_PARALLELISM
+          value: "2"
+        - name: MAX_STEPS
+          value: "5"
+        - name: GLOBAL_BATCH_SIZE
+          value: "2"
+        - name: MICRO_BATCH_SIZE
+          value: "1"
+        - name: APPROX_NUM_PARAMS
+          value: "30e9"
+        - name: MLFLOW_TRACKING_URI
+          # From `terraform output mlflow_tracking_endpoint` (infra/README.md).
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: ep-qwen3-30b-a3b-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: dshm
+          mountPath: /dev/shm
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          cd /opt/Megatron-Bridge
+          export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
+          echo "=== Qwen3-30B-A3B EP=2 - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/run_experiment.py \
+            --model qwen3-30b-a3b --expert-parallelism "$EXPERT_PARALLELISM" \
+            --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
+            --micro-batch-size "$MICRO_BATCH_SIZE" \
+            --approx-num-params "$APPROX_NUM_PARAMS" \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen3-ep-worker-1
+  namespace: default
+  labels:
+    app: qwen3-ep-worker
+spec:
+  hostname: qwen3-ep-worker-1
+  subdomain: qwen3-ep-headless
+  restartPolicy: Never
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [qwen3-ep-worker]}
+          topologyKey: kubernetes.io/hostname
+  volumes:
+    - name: scripts
+      configMap:
+        name: qwen3-training-scripts
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+  containers:
+    - name: worker
+      image: nvcr.io/nvidia/nemo:25.09
+      envFrom:
+        - secretRef:
+            name: mlflow-creds
+      env:
+        - name: NODE_RANK
+          value: "1"
+        - name: MASTER_ADDR
+          value: qwen3-ep-worker-0.qwen3-ep-headless.default.svc.cluster.local
+        - name: MASTER_PORT
+          value: "29500"
+        - name: EXPERT_PARALLELISM
+          value: "2"
+        - name: MAX_STEPS
+          value: "5"
+        - name: GLOBAL_BATCH_SIZE
+          value: "2"
+        - name: MICRO_BATCH_SIZE
+          value: "1"
+        - name: APPROX_NUM_PARAMS
+          value: "30e9"
+        - name: MLFLOW_TRACKING_URI
+          value: "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+        - name: MLFLOW_RUN_NAME
+          value: ep-qwen3-30b-a3b-2gpu
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: dshm
+          mountPath: /dev/shm
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          pip install --quiet mlflow-skinny
+          cd /opt/Megatron-Bridge
+          export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
+          echo "=== Qwen3-30B-A3B EP=2 - node-rank=$NODE_RANK ==="
+          torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+            --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+            /scripts/run_experiment.py \
+            --model qwen3-30b-a3b --expert-parallelism "$EXPERT_PARALLELISM" \
+            --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
+            --micro-batch-size "$MICRO_BATCH_SIZE" \
+            --approx-num-params "$APPROX_NUM_PARAMS" \
+            --mlflow-run-name "$MLFLOW_RUN_NAME"
+      resources:
+        limits:
+          nvidia.com/gpu: 1

@@ -160,13 +160,22 @@ module so only the parallelism degree under test changes each time:
    only `context_parallelism` differs - comparing straight to experiment 1's
    4096-seq DP baseline would confound "CP vs DP" with "long vs short
    sequence".
+5. **Expert Parallel (stretch)** — Qwen3-30B-A3B MoE, EP=2. Deliberately
+   attempted even though a back-of-envelope check predicted it wouldn't fit
+   - and it didn't: a confirmed `torch.OutOfMemoryError` building the
+   optimizer's fp32 master parameters, before a single training step. Kept
+   in the repo and written up honestly (not hidden) as a demonstration of a
+   real hardware/scale limit - see `training/README.md`'s Results section
+   for the exact numbers and error.
 
-All four ran successfully end-to-end and logged to MLflow — see
-[`training/README.md`](../training/README.md#results) for the implementation
-and results, including a real (if modest, at this scale) measured slowdown
-from running TP across nodes without InfiniBand, a more surprising result
-for PP (see the README's takeaway on communication volume), and a clean
-memory-vs-throughput trade-off for CP at long sequence length.
+Experiments 1-4 ran successfully end-to-end and logged to MLflow — see
+[`training/README.md`](../training/README.md#results) for the
+implementation and results, including a real (if modest, at this scale)
+measured slowdown from running TP across nodes without InfiniBand, a more
+surprising result for PP (see the README's takeaway on communication
+volume), and a clean memory-vs-throughput trade-off for CP at long sequence
+length. Experiment 5 (EP) confirmed infeasible on this hardware, also
+documented there.
 
 *Note*: the exact NVIDIA-named convenience recipes in the table above
 (`qwen3_1p7b_pretrain_1gpu_h100_bf16_config` etc.) come from a newer
@@ -179,12 +188,10 @@ and parallelism degrees, just not the newer named wrapper. See
 
 ## Deferred / stretch (not attempted this pass)
 
-Consistent with how the 2x8-GPU switch and the MPI Operator gap were already
-deferred elsewhere in this repo:
-
-- **Expert Parallelism** (Qwen3-30B-A3B, EP=2 override) — mechanically
-  possible on 2 GPUs (the recipe exists above) but adds real memory/scope
-  risk for a first pass; written up here, not yet run.
+Nothing left deliberately unattempted from the vacancy's list of strategies
+- DP, TP, PP, CP, and EP all have a real run and a documented result (EP's
+result being "confirmed infeasible on 2 GPUs", not a success, but that's
+still an honest, evidenced answer rather than a skip).
 
 ## References
 
