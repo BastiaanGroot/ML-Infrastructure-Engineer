@@ -168,14 +168,30 @@ module so only the parallelism degree under test changes each time:
    real hardware/scale limit - see `training/README.md`'s Results section
    for the exact numbers and error.
 
-Experiments 1-4 ran successfully end-to-end and logged to MLflow — see
-[`training/README.md`](../training/README.md#results) for the
+The vacancy doc also calls out "offloading, custom kernels, hardware
+features, attention optimisations" specifically, beyond the five
+parallelism strategies above - three more single-variable experiments
+against the same DP=2/Qwen3-1.7B baseline cover that:
+
+6. **FP8 mixed precision** — same as the DP=2 baseline, only `--precision
+   bf16_with_fp8_current_scaling_mixed` instead of the default `bf16_mixed`
+   - Hopper's native low-precision GEMM path.
+7. **Attention backend** — same baseline, `--attention-backend unfused`
+   (plain PyTorch matmul+softmax+matmul) instead of Megatron-Core's default
+   fused/FlashAttention kernel, to make the custom-kernel effect measurable.
+8. **CPU offload** — same baseline, `--cpu-offload` (activation CPU
+   offloading for all-but-one layer).
+
+Experiments 1-4 and 6-8 ran successfully end-to-end and logged to MLflow —
+see [`training/README.md`](../training/README.md#results) for the
 implementation and results, including a real (if modest, at this scale)
 measured slowdown from running TP across nodes without InfiniBand, a more
 surprising result for PP (see the README's takeaway on communication
-volume), and a clean memory-vs-throughput trade-off for CP at long sequence
-length. Experiment 5 (EP) confirmed infeasible on this hardware, also
-documented there.
+volume), a clean memory-vs-throughput trade-off for CP at long sequence
+length, a smaller-than-naively-expected FP8 speedup, attention backend
+mattering for memory far more than throughput at this scale, and CPU
+offload's memory saving coming essentially free at this scale. Experiment 5
+(EP) confirmed infeasible on this hardware, also documented there.
 
 *Note*: the exact NVIDIA-named convenience recipes in the table above
 (`qwen3_1p7b_pretrain_1gpu_h100_bf16_config` etc.) come from a newer
@@ -188,9 +204,10 @@ and parallelism degrees, just not the newer named wrapper. See
 
 ## Deferred / stretch (not attempted this pass)
 
-Nothing left deliberately unattempted from the vacancy's list of strategies
-- DP, TP, PP, CP, and EP all have a real run and a documented result (EP's
-result being "confirmed infeasible on 2 GPUs", not a success, but that's
+Nothing left deliberately unattempted from the vacancy's list of topics -
+DP, TP, PP, CP, EP, FP8 precision, attention backend, and CPU offloading all
+have a real run and a documented result (EP's result being "confirmed
+infeasible on 2 GPUs", not a success, but that's
 still an honest, evidenced answer rather than a skip).
 
 ## References

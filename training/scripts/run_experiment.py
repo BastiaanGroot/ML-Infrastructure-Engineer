@@ -131,7 +131,9 @@ def main() -> None:
     if args.cpu_offload:
         cfg.model.cpu_offloading = True
         cfg.model.cpu_offloading_activations = True
-        cfg.model.cpu_offloading_num_layers = cfg.model.num_layers
+        # Megatron-Core requires cpu_offloading_num_layers < num_layers
+        # (strictly less, not <=) - offload all-but-one layer's activations.
+        cfg.model.cpu_offloading_num_layers = cfg.model.num_layers - 1
 
     # No persistent storage mounted for this mock/demo run - checkpointing to
     # local ephemeral storage only, and never triggers within train_iters.

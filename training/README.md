@@ -47,6 +47,9 @@ trained checkpoint.
 | 4 | [`k8s/experiment-04-context-parallel.yaml`](k8s/experiment-04-context-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | CP=2 | 16384 | 2 |
 | 4b | [`k8s/experiment-04b-longseq-baseline.yaml`](k8s/experiment-04b-longseq-baseline.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (CP=1 baseline for #4) | 16384 | 2 |
 | 5 | [`k8s/experiment-05-expert-parallel.yaml`](k8s/experiment-05-expert-parallel.yaml) | Qwen3-30B-A3B (MoE) | `megatron.bridge.recipes.qwen.qwen3_30b_a3b` | EP=2 (stretch, **OOMs** - see Results) | 4096 | 2 |
+| 6 | [`k8s/experiment-06-fp8.yaml`](k8s/experiment-06-fp8.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, FP8 precision (baseline for #1 is BF16) | 4096 | 2 |
+| 7 | [`k8s/experiment-07-attention-backend.yaml`](k8s/experiment-07-attention-backend.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, unfused attention (baseline for #1 is fused/auto) | 4096 | 2 |
+| 8 | [`k8s/experiment-08-cpu-offload.yaml`](k8s/experiment-08-cpu-offload.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, activation CPU offload (baseline for #1 has it off) | 4096 | 2 |
 
 All rows use the exact same model and recipe module - only the parallelism
 degree (and, for 4/4b, sequence length) under test differs, so each is a
@@ -64,7 +67,10 @@ straight to experiment 1 would confound "CP vs DP" with "long vs short
 sequence". Both 4/4b also need a larger `dshm` `emptyDir` (8Gi vs 2Gi
 elsewhere) - the 4x longer sequence means 4x bigger batches through
 PyTorch's DataLoader workers, which otherwise die with a shared-memory
-"Bus error".
+"Bus error". Experiments 6-8 are each a single flag away from experiment 1's
+exact baseline (`--precision`, `--attention-backend`, `--cpu-offload`
+respectively) - the cleanest possible single-variable comparisons in this
+set.
 
 All manifests define a headless `Service` + 2 plain `Pod`s (rank 0 /
 rank 1) running `torchrun` directly — deliberately **no new operator**
@@ -131,6 +137,21 @@ kubectl delete -f k8s/experiment-04b-longseq-baseline.yaml
 kubectl apply -f k8s/experiment-05-expert-parallel.yaml
 kubectl logs -f qwen3-ep-worker-0
 kubectl delete -f k8s/experiment-05-expert-parallel.yaml
+
+# Experiment 6 (FP8) - same 2-GPU constraint:
+kubectl apply -f k8s/experiment-06-fp8.yaml
+kubectl logs -f qwen3-fp8-worker-0
+kubectl delete -f k8s/experiment-06-fp8.yaml
+
+# Experiment 7 (unfused attention) - same 2-GPU constraint:
+kubectl apply -f k8s/experiment-07-attention-backend.yaml
+kubectl logs -f qwen3-unfused-worker-0
+kubectl delete -f k8s/experiment-07-attention-backend.yaml
+
+# Experiment 8 (CPU offload) - same 2-GPU constraint:
+kubectl apply -f k8s/experiment-08-cpu-offload.yaml
+kubectl logs -f qwen3-offload-worker-0
+kubectl delete -f k8s/experiment-08-cpu-offload.yaml
 ```
 
 First run on each node pulls the ~19GB `nemo` image (one-time per node,
@@ -141,21 +162,24 @@ needed).
 
 ## Results
 
-All five runs (experiments 1-4 plus 4b) ran successfully end-to-end (20
-iterations + train/valid/test eval) on the live 2-node cluster and logged to
-MLflow:
+Seven of the eight runs (experiments 1-4, 4b, and 6-8) ran successfully
+end-to-end (20 iterations + train/valid/test eval) on the live 2-node
+cluster and logged to MLflow:
 [`dp-baseline-qwen3-1p7b`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/14a3393a0c63406a9487453d382eff50),
 [`tp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/0aa09cd060a940dfadee442e327ea18d),
 [`pp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/02bd574d2db94f018047f503c7a2db80),
 [`cp-qwen3-1p7b-2gpu-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/167b0ae1dbb243e79e044406bfc70638),
+[`dp-longseq-baseline-qwen3-1p7b-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/65123a0219e049a795e1c867d1c78a42),
+[`fp8-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/38a8c403b6e04462a5985d7f8c3a9312),
+[`unfused-attn-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/bc376002cdba4cb09c40bf61113f97b6),
 and
-[`dp-longseq-baseline-qwen3-1p7b-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/65123a0219e049a795e1c867d1c78a42)
+[`cpu-offload-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/3fd91e0b292a454da1198221ccd85571)
 under the `qwen3-parallelism-experiments` experiment (link requires the
 MLflow admin credentials above). Same model, same recipe module throughout -
-only the parallelism degree (and, for 4/4b, sequence length) under test
-differs - a clean single-variable comparison in each case. Experiment 5
-(EP=2) OOMs before reaching the MLflow logging call - see its own section
-below for the (still real, still documented) result.
+only the one flag under test differs from its matched baseline each time -
+a clean single-variable comparison in every case. Experiment 5 (EP=2) OOMs
+before reaching the MLflow logging call - see its own section below for
+the (still real, still documented) result.
 
 > An earlier pass ran experiment 2 against Qwen3-4B instead of Qwen3-1.7B,
 > which confounded "TP vs DP" with "bigger vs smaller model". That run
@@ -341,3 +365,65 @@ exposes `--cpu-offload` for activations - Megatron-Core also has a
 would move the fp32 master/momentum/variance states to host RAM; not
 attempted here to keep this pass focused, but a plausible next step for
 scaling EP further without more GPUs).
+
+### FP8 / attention backend / CPU offload vs the DP=2 baseline
+
+Experiments 6-8 each change exactly one flag from experiment 1's exact
+DP=2/Qwen3-1.7B/seq=4096 baseline - the cleanest single-variable comparisons
+in this whole set:
+
+| Steady-state metric (iters 2-20 avg) | Baseline (BF16, fused attn) | FP8 (exp. 6) | Unfused attn (exp. 7) | CPU offload (exp. 8) |
+|---|---|---|---|---|
+| Step time | 2.29s | 2.06s | 2.30s | 2.27s |
+| Throughput per GPU | 42.0 TFLOP/s | 46.7 TFLOP/s | 41.9 TFLOP/s | 42.4 TFLOP/s |
+| MFU (vs H200 989 TFLOP/s bf16 peak) | 4.25% | 4.73%* | 4.24% | 4.29% |
+| **Peak GPU memory** (MLflow-logged) | **53.3 GB** | **51.1 GB** | **84.3 GB** | **42.9 GB** |
+
+\* FP8's *achieved* TFLOP/s did go up (46.7 vs 42.0), but its *theoretical*
+peak roughly doubles too (H200 FP8 dense peak is ~1979 TFLOP/s vs bf16's
+989) - measured against its own peak, FP8's MFU is actually **lower**
+(2.36%), which is exactly the point of Takeaway 5 below.
+
+**Takeaway 5 (FP8 gives a real but modest speedup here, far short of 2x)**:
+FP8 cut step time by **~10%** (2.29s -> 2.06s) - a genuine, measurable win,
+but nowhere near the ~2x Hopper's FP8 tensor cores nominally offer over
+BF16. At this tiny scale (1.7B params, seq=4096, batch=2/GPU), three things
+eat into that theoretical ceiling: (1) only GEMMs run in FP8 - attention,
+layernorm, and other elementwise ops stay in BF16, so FP8 only speeds up
+part of each layer; (2) `bf16_with_fp8_current_scaling_mixed` computes a
+per-tensor amax/scale factor every step, real overhead that a longer,
+larger run would amortize better; (3) the model/batch here are small enough
+that these matmuls may not be big enough to fully saturate the FP8 tensor
+cores' extra throughput in the first place. Peak memory drops only
+slightly (53.3GB -> 51.1GB, ~4%) since bf16 master weights and optimizer
+state are unchanged - only the compute-path tensors go to FP8.
+
+**Takeaway 6 (attention backend matters for memory here, not speed)**: the
+unfused (plain PyTorch) attention backend is statistically indistinguishable
+from the default fused/FlashAttention path on **throughput** (41.9 vs 42.0
+TFLOP/s/GPU - within run-to-run noise) at this scale, because attention's
+own QK^T/softmax/AV compute is a small fraction of each layer's total FLOPs
+next to the large QKVO and FFN projection matmuls (identical either way).
+But **peak memory jumps 58%** (53.3GB -> 84.3GB), because the unfused path
+explicitly materializes the full `[batch, heads, seq, seq]` attention score
+matrix in HBM, while FlashAttention/fused kernels never do (that's their
+core trick - fusing QK^T -> softmax -> AV so the full matrix is never
+written to HBM). This flips the common assumption that flash attention is
+mainly a speed optimization: at this scale, its *memory* saving is the
+dominant, clearly measurable effect - and that memory gap would only widen
+further at longer sequences (see the CP section above for why: attention
+memory scales with `seq^2` unfused vs roughly linearly for FlashAttention).
+
+**Takeaway 7 (CPU offload's memory saving is essentially free here)**:
+offloading activations to host RAM cut peak GPU memory by **~20%** (53.3GB
+-> 42.9GB) with **no measurable throughput cost** (42.0 vs 42.4 TFLOP/s/GPU
+- within noise, if anything slightly faster, plausibly run-to-run
+variance). This isn't offloading being "free" in general - it's specific
+to this scale: with only 20 iterations, a short 4096-token sequence, and a
+1.7B model, the activation volume moved over PCIe each step is small enough
+that the transfer comfortably overlaps with GPU compute and never becomes
+the bottleneck. At a larger batch/sequence/model, or with a slower
+CPU-GPU interconnect, PCIe bandwidth would eventually saturate and this
+trade-off would look more like TP/PP/CP's - real throughput cost for real
+memory savings. This result demonstrates the mechanism working correctly,
+not a claim that offloading is costless at any scale.
