@@ -2,7 +2,8 @@
 
 PoC for the [ML Infrastructure Engineer take-home assignment](docs/ML-Infrastructure-Engineer.md):
 validate a Nebius GPU cluster's capabilities, then run a training/inference
-workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
+workload on it (spec: 16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem;
+the live cluster uses 16x H100 over InfiniBand instead, see [Hardware](#hardware-2x8-h100-with-infiniband)).
 
 **Nebius project:** [`ml-infra-poc`](https://console.nebius.com/project-e00rdtrppr0083wkrkw4td) (tenant `csa-hiring-sandbox2`)
 
@@ -16,7 +17,7 @@ workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
 
 ## Training (Option 1)
 
-[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) as if the future 2x8-GPU/InfiniBand cluster were live, mapping model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) then implements and runs a small, honest subset of that outline on the *current* live 2x1-GPU cluster — single-variable experiments on Qwen3 covering DP, TP, PP, CP, EP, FP8, attention backend, CPU offloading, a cross-node NCCL bandwidth sweep, and Nsight Systems profiles, logged to MLflow. See its [README](training/README.md#results) for the results.
+[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) for the 2x8-GPU/InfiniBand cluster (now live), mapping model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) then implements and runs a small, honest subset of that outline on the earlier 2x1 H200 cluster — single-variable experiments on Qwen3 covering DP, TP, PP, CP, EP, FP8, attention backend, CPU offloading, a cross-node NCCL bandwidth sweep, and Nsight Systems profiles, logged to MLflow. See its [README](training/README.md#results) for the results.
 
 [`dashboard/`](dashboard/) is a Streamlit app over those results (live from MLflow): strategy comparison, NCCL/Nsight communication view, and an analytical TP x PP x DP planner validated against the measured runs. Hosted on a Terraform-managed VM (public, no auth for now) — see its [README](dashboard/README.md).
 
@@ -38,39 +39,36 @@ Decisions to make (and record, once made) while executing the [take-home exercis
 - [x] Training framework — **NVIDIA NeMo Framework / Megatron-Bridge (Megatron-Core)** over plain FSDP2/DeepSpeed-ZeRO: FSDP/ZeRO shard memory across data-parallel ranks but don't split individual layers/matmuls (tensor parallelism), layers across GPUs (pipeline parallelism), the sequence dimension (context parallelism), or expert routing (expert parallelism) — all first-class in Megatron-Core and necessary building blocks for genuine +100B training. Matches the vacancy doc's explicit mention of Megatron-LM. See [docs/training-strategy-outline.md](docs/training-strategy-outline.md).
 - [x] Model family — **Qwen3** (dense 600M-32B + MoE 30B-A3B/235B-A22B): Apache-2.0, first-class Megatron-Bridge support, and the only family in scope that exercises every strategy above within one lineage, with 235B-A22B as the genuine >100B target.
 
-## Future hardware: 2x8-GPU nodes with InfiniBand
+## Hardware: 2x8 H100 with InfiniBand
 
 *(This is the single canonical note on this — other docs just link here.)*
 
-The test cluster currently runs **2 nodes x 1 GPU each** (2 GPUs total, not
-the PoC spec's 16). An 8-GPU-per-node preset on `gpu-h200-sxm`/`fabric-7` in
-`eu-north1` was capacity-constrained when checked (confirmed via `nebius
-capacity resource-advice` as a real physical constraint, not a quota/policy
-limit — tenant quota is 32 H200s) — flagged to the Nebius contact, still
-unresolved. Even the 1-GPU preset hit a transient `NotEnoughResources` during
-this session's node replacement (resolved on its own after ~40 min), so
-capacity here is generally tight, not just for the 8-GPU preset.
+**Now:** the GPU node group runs **2 nodes x 8 H100** (`gpu-h100-sxm`,
+`8gpu-128vcpu-1600gb`, 16 GPUs total), attached to a
+`nebius_compute_v1_gpu_cluster` on **`fabric-4`** so the nodes share an
+InfiniBand fabric (see [`infra/main.tf`](infra/main.tf)). fabric-4 was picked
+because `nebius capacity resource-advice list` showed full on-demand
+availability for this preset there (4/4 VMs, "high"), the most spare
+capacity of the H100 fabrics in `eu-north1`. Tenant quota is 32 H100s.
 
-**The plan once capacity allows**, switching to 2 nodes x 8 GPUs (16 total):
+**Before:** until 2026-09-28 the cluster ran **2 nodes x 1 H200**
+(`gpu-h200-sxm`, `1gpu-16vcpu-200gb`), with no InfiniBand, because 8-GPU H200
+nodes weren't available. Every result recorded so far in
+[`training/README.md`](training/README.md#results) and
+[`cluster-validator/README.md`](cluster-validator/README.md#results-last-validated-run)
+comes from that cluster, where cross-node traffic went over plain Ethernet
+(~2.35 GB/s measured).
 
-1. Change `gpu_preset` in [`infra/variables.tf`](infra/variables.tf) to
-   `8gpu-128vcpu-1600gb` — confirmed as the correct preset name for
-   InfiniBand-connected 8-GPU nodes by the Nebius Solutions Library's
-   [`k8s-training`](https://github.com/nebius/nebius-solutions-library/tree/main/k8s-training)
-   module.
-2. **Add a `nebius_compute_v1_gpu_cluster` resource** to
-   [`infra/main.tf`](infra/main.tf) (referencing `infiniband_fabric =
-   "fabric-7"`) and attach the node group to it — only nodes in a GPU
-   cluster get the InfiniBand fabric connection between them. This resource
-   doesn't exist in `main.tf` yet; it's a gap found during this review, not
-   yet implemented (deliberately deferred, per user decision, until the
-   switch actually happens).
-3. Install the [MPI Operator](https://github.com/kubeflow/mpi-operator) —
-   needed to actually run `cluster-validator/k8s/job-nccl-multinode.yaml`
-   (already written, never run). The Solutions Library's
+**Still to do on the new cluster:**
+
+1. Confirm pods can actually use InfiniBand. The nodes don't advertise
+   InfiniBand/RDMA devices to Kubernetes, so pods probably need
+   `/dev/infiniband` access (privileged, or a device plugin) for NCCL to use
+   it rather than falling back to sockets.
+2. Install the [MPI Operator](https://github.com/kubeflow/mpi-operator) and
+   run `cluster-validator/k8s/job-nccl-multinode.yaml` (written, never run)
+   for a real InfiniBand bandwidth number. Nebius Solutions Library's
    [`modules/nccl-test`](https://github.com/nebius/nebius-solutions-library/tree/main/modules/nccl-test)
-   has a working Terraform pattern for installing it via a bootstrap
-   `kubernetes_job`, instead of by hand.
-4. Re-run `cluster-validator` — `nccl_bench`'s current "fail" (0 GB/s on a
-   single GPU, see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run))
-   should then produce a real InfiniBand bandwidth number instead.
+   shows how to install it from Terraform.
+3. Re-run the training experiments at 8 GPUs per node (update the
+   `training/k8s/` manifests' `nproc_per_node` and GPU requests).

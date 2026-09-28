@@ -2,8 +2,11 @@
 
 Small-scale, real implementation of the design in
 [`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md) —
-single-variable experiments that fit exactly on the current live **2 nodes x
-1 GPU** cluster, comparing Data/Tensor/Pipeline/Context/Expert Parallelism
+single-variable experiments that fit exactly on the earlier **2 nodes x
+1 H200** cluster (no InfiniBand; the cluster has since moved to 2x 8x H100
+with InfiniBand, see the root README's
+["Hardware"](../README.md#hardware-2x8-h100-with-infiniband) section, and
+these experiments haven't been re-run there yet), comparing Data/Tensor/Pipeline/Context/Expert Parallelism
 head-to-head, with results logged to the live MLflow tracking server. All
 ran on the real cluster and produced a documented result — see
 [Results](#results) (Expert Parallelism's result is a confirmed OOM, not a
@@ -305,7 +308,7 @@ rank). At this tiny scale that memory saving doesn't matter - all three
 comfortably fit an H200's 143GB - but it's exactly why TP/PP become
 *necessary* (not just a throughput trade-off) once a single model copy no
 longer fits on one GPU, consistent with the outline doc's framing that
-today's 2-GPU cluster is far below where 3D parallelism becomes
+the 2-GPU cluster these ran on is far below where 3D parallelism becomes
 memory-necessary rather than throughput-optional.
 
 ### Context Parallel (CP=2) vs a matched long-sequence DP=2 baseline

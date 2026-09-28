@@ -1,7 +1,8 @@
 # infra
 
 Terraform to reproduce the PoC infrastructure from scratch in a Nebius
-project: VPC network + subnet, an mk8s cluster, one GPU node group, a
+project: VPC network + subnet, an mk8s cluster, one GPU node group in an
+InfiniBand GPU cluster, a
 container registry for `cluster-validator` (and other) images, and an Object
 Storage bucket for run logs (`summary.json` etc. — see
 [`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)).
@@ -25,11 +26,10 @@ providers, etc.).
    terraform apply -var="project_id=<your_project_id>"
    ```
 3. See [`variables.tf`](variables.tf) for other overridable settings (region,
-   GPU platform/preset, node count). The default GPU preset
-   (`1gpu-16vcpu-200gb`) reflects what was actually available during this
-   PoC — see the root README's ["Future hardware: 2x8-GPU nodes with
-   InfiniBand"](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband)
-   section for the target 8-GPU switch and what else it needs.
+   GPU platform/preset/fabric, node count). Defaults are 2x 8x H100
+   (`gpu-h100-sxm`, `8gpu-128vcpu-1600gb`) in a GPU cluster on `fabric-4` —
+   see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband)
+   section for why, and what's still to verify.
 4. Optional GPU node SSH access / shared filesystem mount / extra security
    group — not secrets (an SSH key here is a *public* key), but
    environment-specific, so unset by default. Copy

@@ -42,7 +42,7 @@ docker run --rm --gpus all \
 ## Run on the cluster
 
 - **Single-node checks** (GPU health + NCCL within one node + LLM smoketest + storage): `k8s/job-validate.yaml`
-- **Multi-node InfiniBand check** (2x 8-GPU nodes, matching the 16-GPU PoC capacity): `k8s/job-nccl-multinode.yaml` (requires the [MPI Operator](https://github.com/kubeflow/mpi-operator)). This targets the **future** node group — see the root README's ["Future hardware: 2x8-GPU nodes with InfiniBand"](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband) for the full switch plan (preset, GPU-cluster resource, MPI Operator install).
+- **Multi-node InfiniBand check** (2x 8-GPU nodes, matching the 16-GPU PoC capacity): `k8s/job-nccl-multinode.yaml` (requires the [MPI Operator](https://github.com/kubeflow/mpi-operator)). Written for the current 2x 8x H100 node group, not yet run (the MPI Operator isn't installed yet) — see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband) section.
 
 ```bash
 kubectl apply -f k8s/job-validate.yaml
@@ -164,8 +164,9 @@ to Object Storage (see above).
 
 ## Results (last validated run)
 
-Ran via `k8s/job-validate.yaml` on the live PoC cluster (2x `gpu-h200-sxm`
-nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC) on
+Ran via `k8s/job-validate.yaml` on the earlier PoC cluster (2x `gpu-h200-sxm`
+nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC — since
+replaced by 2x 8x H100 with InfiniBand, not yet re-validated) on
 2026-09-17 (rerun after switching the LLM smoketest to a real Qwen3-0.6B
 checkpoint — same model family as [`training/`](../training/README.md),
 replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
@@ -210,9 +211,8 @@ replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
 - **NCCL bench — expected fail, not a bug.** `all_reduce_perf -g 1` has nothing
   to actually reduce across on a single-GPU node, so bus bandwidth reads `0`
   and trips the (NVLink/IB-oriented) 100 GB/s threshold. This check only
-  becomes meaningful once nodes have ≥2 GPUs — see the [multi-node /
-  future-hardware note](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband)
-  for the 8-GPU + InfiniBand plan this is written for.
+  becomes meaningful once nodes have ≥2 GPUs, which the current 8-GPU
+  nodes do — see the root README's [hardware note](../README.md#hardware-2x8-h100-with-infiniband).
 - **LLM smoketest — pass, now on the actual model family we train.** A real
   `generate()` (inference) plus one forward+backward pass (training) both
   ran successfully on GPU in well under a second, loading a real Qwen3-0.6B

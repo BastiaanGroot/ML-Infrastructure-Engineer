@@ -6,12 +6,12 @@ strategies... illustrate how the client may set up training on their
 cluster for a larger model (+100B)" — see
 [`docs/ML-Infrastructure-Engineer.md`](ML-Infrastructure-Engineer.md)).
 
-This doc is written **as if the future 2x8-GPU/InfiniBand cluster** (see the
-root README's ["Future hardware"](../README.md#future-hardware-2x8-gpu-nodes-with-infiniband)
-section) were already live — it's the full design the client would use at
-target PoC capacity (16 H200s) and beyond. [`training/README.md`](../training/README.md)
-covers what we actually ran on today's real 2x1-GPU cluster, which is a
-deliberately small, honest subset of this outline.
+This doc is the full design for the **2x8-GPU/InfiniBand cluster** (16x
+H100, now live — see the root README's
+["Hardware"](../README.md#hardware-2x8-h100-with-infiniband) section) and
+beyond. [`training/README.md`](../training/README.md) covers what we actually
+ran on the earlier 2x1 H200 cluster, a deliberately small, honest subset of
+this outline.
 
 ## Framework: NeMo Framework / Megatron-Bridge (Megatron-Core)
 
@@ -81,62 +81,54 @@ spanning our exact target range:
 | Qwen3-235B-A22B (MoE) | PEFT (LoRA/DoRA) | 4 | 4 | 1 | 4 | 64 | 8 |
 
 Bolded rows are the two data points that matter most for this project: the
-**Qwen3-4B/2-GPU recipe is an exact fit for our current live cluster** (see
-below), and **Qwen3-235B-A22B is the real >100B target** the assignment
+**Qwen3-4B/2-GPU recipe was an exact fit for the earlier 2x1-GPU cluster**
+(see below), and **Qwen3-235B-A22B is the real >100B target** the assignment
 references.
 
 ## A note on H100 vs H200
 
 The table above is Megatron-Bridge's **H100** recipe set (see the file path
-above), while our PoC cluster runs **H200**s. This is intentional, not an
-oversight worth "fixing":
+above), and the live PoC cluster now runs **H100**s too (2x8, InfiniBand),
+matching both the table and the customer's real target hardware (the
+assignment's overview specifies a 512x H100 deployment). The earlier
+experiments in [`training/`](../training/README.md#results) ran on **H200**s,
+which is still comparable:
 
 - **Compute is identical.** H100 and H200 are the same GH100 die at the same
   clocks - both peak at 989 TFLOP/s bf16 (dense, non-sparse) tensor-core
-  throughput per GPU. H200 changes nothing about achievable TFLOP/s or MFU.
+  throughput per GPU, so the H200 runs' **throughput and MFU numbers
+  transfer directly** to H100.
 - **H200 is purely a memory upgrade**: 141GB HBM3e @ ~4.8TB/s vs H100's 80GB
-  HBM3 @ ~3.35TB/s - about 76% more capacity and 43% more bandwidth, same
-  compute.
-- The table is deliberately anchored to H100 because that's the customer's
-  **real target hardware** - the assignment's overview specifies a 512x
-  H100 deployment. Our 16x H200 PoC cluster is a capacity-matched stand-in
-  for validating the same parallelism strategies, not the production
-  target itself.
-- Practical consequence: because H200 has materially more VRAM per GPU, a
-  model that needs a given TP/PP degree to *fit* on 80GB H100s could
-  plausibly fit at a lower degree on our 141GB H200s (e.g. skip a PP stage
-  or drop TP from 4 to 2). But since compute is unchanged, the table's
-  per-GPU **throughput and MFU expectations transfer directly** to H200 -
-  only the memory-driven minimum parallelism degree might shrink, not the
-  achievable TFLOP/s ceiling. In our own [`training/`](../training/README.md#results)
-  runs this showed up directly: Qwen3-1.7B/4B comfortably fit in
-  33-65GB peak, far under even an H100's 80GB, so H200's extra headroom
-  wasn't a factor at this tiny scale - it will start to matter once models
-  approach the 32B+ tier in the table above.
+  HBM3 @ ~3.35TB/s. On H100, a model can need a higher TP/PP degree just to
+  *fit* than it did on H200.
+- Concretely for re-running our experiments: most peaked at 28-65GB and
+  still fit in 80GB, but the long-sequence DP baseline (seq 16384, **85.1GB**)
+  and the unfused-attention run (**84.3GB**) won't fit on one H100 as-is -
+  they need recompute, a smaller micro-batch, or CP/TP.
 
 ## Sizing insight: what actually fits on the PoC's 16 GPUs
 
 This is the useful, honest takeaway for the client, not just a table:
 
-- The *future* 16-GPU (2x8, InfiniBand) PoC cluster comfortably covers real
+- The 16-GPU (2x8 H100, InfiniBand) PoC cluster comfortably covers real
   3D parallelism up to **dense Qwen3-32B** (TP=8, PP=2) or the **30B-A3B MoE**
   tier (TP=4, PP=2, EP=4) — both fit in a single 8-GPU node's worth of TP/EP
   fan-out plus modest pipeline depth.
 - The **235B-A22B flagship needs 64-128 GPUs** per NVIDIA's own validated
   recipe (TP=4, PP=16, CP=2, EP=8 for pretrain) — 4-8x our target PoC
   capacity. A client wanting to actually pretrain a 235B-class MoE model
-  would need a materially larger reservation than the 16 H200s discussed
+  would need a materially larger reservation than the 16 H100s discussed
   here; 16 GPUs is right-sized for fine-tuning/PEFT on something in the
   30-32B tier, not for pretraining a 100B+ model from scratch.
 - This maps directly onto the original 512-H100 reservation mentioned in
-  the assignment's overview — that capacity (32x our current PoC) would
+  the assignment's overview — that capacity (32x our 16-GPU PoC) would
   comfortably clear the 235B-A22B SFT/PEFT tier (64 GPUs) with room for
   multiple concurrent experiments.
 
-## What we actually ran (today's 2x1-GPU cluster)
+## What we actually ran (the earlier 2x1 H200 cluster)
 
-The live cluster has **2 nodes x 1 GPU each** (2 GPUs total, no
-InfiniBand — see the root README's "Future hardware" note). That's below
+At the time, the cluster had **2 nodes x 1 H200 each** (2 GPUs total, no
+InfiniBand — see the root README's "Hardware" note). That's below
 even the smallest multi-GPU recipe above, so the real, small-scale
 implementation deliberately picks single-variable experiments that fit
 exactly and teach the most, all using the same Qwen3-1.7B model/recipe
