@@ -24,17 +24,23 @@ variable "k8s_version" {
 variable "gpu_platform" {
   description = "Compute platform for the GPU node group."
   type        = string
-  default     = "gpu-h200-sxm"
+  default     = "gpu-h100-sxm"
 }
 
 variable "gpu_preset" {
-  description = "Resource preset for the GPU node group. Defaults to the 1-GPU preset actually available at time of writing (8-GPU presets are capacity-constrained) — see the root README's \"Future hardware: 2x8-GPU nodes with InfiniBand\" section for the target preset and the rest of the switch plan (incl. a currently-missing nebius_compute_v1_gpu_cluster resource)."
+  description = "Resource preset for the GPU node group: 8 GPUs per node, InfiniBand-connected via the GPU cluster below."
   type        = string
-  default     = "1gpu-16vcpu-200gb"
+  default     = "8gpu-128vcpu-1600gb"
+}
+
+variable "gpu_fabric" {
+  description = "InfiniBand fabric for the GPU cluster. Must offer gpu_platform/gpu_preset in the region; check `nebius capacity resource-advice list` (fabric-4 had full on-demand availability for 8x H100 when chosen)."
+  type        = string
+  default     = "fabric-4"
 }
 
 variable "gpu_node_count" {
-  description = "Number of GPU nodes in the node group. Currently 2 (1 GPU each); future target is still 2 once switched to the 8-GPU preset above (2x8 = 16 GPUs total)."
+  description = "Number of GPU nodes in the node group (2 x 8 GPUs = 16 total)."
   type        = number
   default     = 2
 }

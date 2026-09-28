@@ -92,6 +92,14 @@ resource "nebius_mk8s_v1_cluster" "main" {
   }
 }
 
+# Only nodes attached to a GPU cluster get the InfiniBand connection between
+# them; without it, cross-node NCCL falls back to Ethernet.
+resource "nebius_compute_v1_gpu_cluster" "main" {
+  parent_id         = var.project_id
+  name              = "${var.cluster_name}-gpu-cluster"
+  infiniband_fabric = var.gpu_fabric
+}
+
 resource "nebius_mk8s_v1_node_group" "gpu" {
   parent_id        = nebius_mk8s_v1_cluster.main.id
   name             = "gpu"
@@ -108,6 +116,10 @@ resource "nebius_mk8s_v1_node_group" "gpu" {
       type             = "NETWORK_SSD"
       size_gibibytes   = 279
       block_size_bytes = 4096
+    }
+
+    gpu_cluster = {
+      id = nebius_compute_v1_gpu_cluster.main.id
     }
 
     gpu_settings = {
