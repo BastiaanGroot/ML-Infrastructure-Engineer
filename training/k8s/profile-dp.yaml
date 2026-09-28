@@ -95,7 +95,7 @@ spec:
               --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
               --micro-batch-size "$MICRO_BATCH_SIZE" \
               --approx-num-params "$APPROX_NUM_PARAMS" \
-              --mlflow-run-name "$MLFLOW_RUN_NAME"
+              --mlflow-run-name "$MLFLOW_RUN_NAME" --run-kind profile
           echo "=== nsys stats: top CUDA kernels by total GPU time (DP=2) ==="
           nsys stats --report cuda_gpu_kern_sum --format column /tmp/profile_dp.nsys-rep
       resources:
@@ -173,7 +173,7 @@ spec:
             --train-iters "$MAX_STEPS" --global-batch-size "$GLOBAL_BATCH_SIZE" \
             --micro-batch-size "$MICRO_BATCH_SIZE" \
             --approx-num-params "$APPROX_NUM_PARAMS" \
-            --mlflow-run-name "$MLFLOW_RUN_NAME"
+            --mlflow-run-name "$MLFLOW_RUN_NAME" --run-kind profile
       resources:
         limits:
           nvidia.com/gpu: 1

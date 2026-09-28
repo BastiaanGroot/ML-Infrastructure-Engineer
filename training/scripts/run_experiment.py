@@ -24,12 +24,37 @@ Usage (invoked by torchrun from the K8s Pod manifests in ../k8s/):
 
 import argparse
 import os
+import re
 import time
 
 import torch
 
 from megatron.bridge.training.gpt_step import forward_step
 from megatron.bridge.training.pretrain import pretrain
+from megatron.bridge.training.utils import train_utils
+
+STEP_LINE = re.compile(r"Step Time : ([\d.]+)s GPU utilization: ([\d.]+)TFLOP/s/GPU")
+
+
+def capture_step_logs() -> list[tuple[float, float]]:
+    """Record (step_time_sec, tflops_per_gpu) for every training iteration.
+
+    Megatron-Bridge 0.1.0rc4 has no callback for its per-iteration timing;
+    it only prints it via train_utils.print_rank_0 (rank 0, every
+    log_interval iterations). Wrapping that one function captures exactly the
+    numbers shown in the pod logs.
+    """
+    steps: list[tuple[float, float]] = []
+    original = train_utils.print_rank_0
+
+    def print_and_capture(message, *args, **kwargs):
+        match = STEP_LINE.search(str(message))
+        if match:
+            steps.append((float(match.group(1)), float(match.group(2))))
+        return original(message, *args, **kwargs)
+
+    train_utils.print_rank_0 = print_and_capture
+    return steps
 
 # H200 SXM tensor-core peaks per NVIDIA's datasheet - used only as the
 # denominator for the approximate MFU estimate below. FP8 dense peak is ~2x
@@ -88,6 +113,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--mlflow-experiment", default="qwen3-parallelism-experiments")
     parser.add_argument("--mlflow-run-name", required=True)
+    parser.add_argument(
+        "--run-kind",
+        choices=["experiment", "profile"],
+        default="experiment",
+        help="MLflow run_kind tag. The dashboard hides 'profile' runs (e.g. "
+        "under nsys, which adds overhead) from the strategy comparison.",
+    )
     return parser.parse_args()
 
 
@@ -141,6 +173,7 @@ def main() -> None:
     cfg.logger.log_throughput = True
     cfg.logger.log_interval = 1
 
+    steps = capture_step_logs()
     torch.cuda.reset_peak_memory_stats()
     start = time.monotonic()
     pretrain(cfg, forward_step)
@@ -173,6 +206,12 @@ def main() -> None:
         "peak_gpu_memory_gb": peak_mem_gb,
         "approx_mfu_pct": mfu * 100,
     }
+    # Iteration 1 includes kernel warmup/compilation - the README's
+    # steady-state tables average iterations 2..N, and so does this.
+    steady = steps[1:]
+    if steady:
+        metrics["steady_step_time_sec"] = sum(s for s, _ in steady) / len(steady)
+        metrics["steady_tflops_per_gpu"] = sum(t for _, t in steady) / len(steady)
     params = {
         "model": args.model,
         "tensor_parallelism": args.tensor_parallelism,
@@ -197,8 +236,12 @@ def main() -> None:
 
     mlflow.set_experiment(args.mlflow_experiment)
     with mlflow.start_run(run_name=args.mlflow_run_name):
+        mlflow.set_tags({"run_kind": args.run_kind})
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
+        for iteration, (step_time, tflops) in enumerate(steps, start=1):
+            mlflow.log_metric("iter_step_time_sec", step_time, step=iteration)
+            mlflow.log_metric("iter_tflops_per_gpu", tflops, step=iteration)
 
 
 if __name__ == "__main__":
