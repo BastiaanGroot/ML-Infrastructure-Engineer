@@ -165,6 +165,14 @@ kubectl apply -f k8s/nccl-bandwidth-configmap.yaml
 kubectl apply -f k8s/experiment-09-nccl-bandwidth.yaml
 kubectl logs -f nccl-bw-worker-0
 kubectl delete -f k8s/experiment-09-nccl-bandwidth.yaml
+
+# Nsight Systems profiles of the DP=2 / TP=2 runs - rank 0 prints its
+# kernel-time table at the end of its log:
+kubectl apply -f k8s/profile-dp.yaml     # or k8s/profile-tp.yaml
+kubectl logs qwen3-profdp-worker-0 | sed -n '/CUDA GPU Kernel Summary/,$p' \
+  > profiles/dp-cuda_gpu_kern_sum.txt
+kubectl delete -f k8s/profile-dp.yaml
+python3 scripts/summarize_kernels.py profiles/*.txt
 ```
 
 First run on each node pulls the ~19GB `nemo` image (one-time per node,
@@ -365,7 +373,8 @@ before a single training step ran. Two smaller, earlier config errors were
 hit and fixed en route (documented for completeness, not hidden): the MoE
 recipe defaults `sequence_parallelism=True`, which asserts unless
 `tensor_parallelism > 1` (fixed in [`run_experiment.py`](scripts/run_experiment.py)
-by only enabling it when `tensor_parallelism > 1`); and the
+by forcing it off at `tensor_parallelism=1`, leaving each recipe's own
+default untouched at TP>1); and the
 `data_parallel_size=2` point above, which needed `global_batch_size=2` not
 `1`.
 
@@ -475,3 +484,72 @@ those experiments were communication-bound rather than compute-bound at
 this scale - and exactly the gap real InfiniBand closes for the target
 512x H100 deployment (see `docs/training-strategy-outline.md`'s H100 vs
 H200 note).
+
+### Nsight Systems: where the GPU time actually goes (DP=2 vs TP=2)
+
+[`k8s/profile-dp.yaml`](k8s/profile-dp.yaml) and
+[`k8s/profile-tp.yaml`](k8s/profile-tp.yaml) re-run experiments 1 and 2
+unchanged, with rank 0's `torchrun` wrapped in `nsys profile`, followed by
+`nsys stats --report cuda_gpu_kern_sum` printed to the pod log. The raw
+tables are in [`profiles/`](profiles/); [`scripts/summarize_kernels.py`](scripts/summarize_kernels.py)
+rolls them up by kernel category. Profiling overhead was modest and
+similar for both: steady-state step time 2.48s vs 2.29s unprofiled (DP),
+1.90s vs 1.73s (TP).
+
+| Share of summed GPU kernel time | DP=2 | TP=2 |
+|---|---|---|
+| NCCL communication | **83.9%** | **94.7%** |
+| GEMM (matmul) | 8.2% | 2.4% |
+| Fused/flash attention | 1.8% | 0.6% |
+| Everything else | 6.1% | 2.3% |
+
+These are shares of kernel time summed across CUDA streams, not of wall
+time - NCCL runs on its own stream and overlaps with compute - but the
+direction is unambiguous: **on this link, both runs spend far more GPU time
+in communication kernels than in compute**. That's the kernel-level
+explanation for the 3-10% MFU figures above.
+
+**Takeaway 9 (the profile matches the measured link bandwidth, per
+collective)**: the per-call NCCL times line up with experiment 9's
+~2.35 GB/s, which makes the whole communication story quantitative rather
+than qualitative:
+
+- **TP=2** issues one `AllReduce_Sum_bf16` per attention/MLP block, forward
+  and backward: 5,928 calls, median **14.7 ms** each. Each one moves the
+  block's activation output, `seq 4096 x micro-batch 2 x hidden 2048 x 2
+  bytes` = 33.5 MB - at ~2.38 GB/s (experiment 9's 16-64 MiB range) that
+  predicts **~14.1 ms**. These all-reduces sit on the critical path of every
+  layer, so they can't be hidden behind compute.
+- **DP=2** doesn't do one big all-reduce: Megatron's distributed optimizer
+  (`use_distributed_optimizer: true`, `grad_reduce_in_fp32: true`) splits it
+  into a `ReduceScatter_Sum_f32` of the gradients plus an `AllGather` of the
+  updated bf16 parameters. Each rank sends half of each: 1.72B x 4 bytes / 2
+  = 3.44 GB of gradients (predicts **1.46 s/step**, measured **1.60 s**) and
+  1.72B x 2 bytes / 2 = 1.72 GB of parameters (predicts **0.73 s**, measured
+  **0.82 s**). That's ~2.4 s of communication against a ~2.3-2.5 s step -
+  DP's step time here is essentially *the time to push the gradients and
+  parameters across the link*, with the ~0.4 s/step of real compute
+  overlapped underneath it (`overlap_grad_reduce: true`).
+
+This also sharpens Takeaway 2's PP explanation: PP=2 (micro-batch 1) sends
+one 16.8 MB activation tensor forward and one gradient tensor back across
+the stage boundary per microbatch - ~134 MB per 4-microbatch step,
+point-to-point and overlapped with the other stage's work. That's ~40x less
+than DP's ~5.2 GB per rank per step, and none of it is a per-layer
+synchronous collective like TP's.
+
+*Side note (sequence parallelism)*: a first TP profile was accidentally run
+with `sequence_parallelism=True` (a since-fixed side effect of the EP fix in
+`run_experiment.py`; `qwen3_1p7b`'s recipe default is `False`, which is what
+experiment 2 used). With SP, each all-reduce becomes an `AllGather` +
+`ReduceScatter` pair of the same total volume, but twice the number of
+calls: steady-state step time rose from 1.90s to **2.36s (+24%)** for a
+small memory saving (33.8 GB -> 31.9 GB peak). On a latency-bound link,
+more, smaller collectives cost real time - SP pays off when activation
+memory is the constraint, not here. Kept as
+[`profiles/tp-seqpar-cuda_gpu_kern_sum.txt`](profiles/tp-seqpar-cuda_gpu_kern_sum.txt).
+
+The `.nsys-rep` files themselves stay in each pod's ephemeral filesystem
+(`kubectl cp` needs a running container, and these pods exit when
+training ends). To open a timeline in the Nsight Systems GUI, write the
+report to a mounted volume or object storage instead of `/tmp`.

@@ -186,6 +186,10 @@ against the same DP=2/Qwen3-1.7B baseline cover that:
    message sizes from 1 MiB to 1 GiB, to put a real GB/s number behind the
    "no InfiniBand" explanation used throughout the other experiments'
    write-ups rather than leaving it as an assumption.
+10. **Nsight Systems profiles** — experiments 1 (DP=2) and 2 (TP=2) re-run
+    under `nsys profile`, with a per-kernel time breakdown showing NCCL
+    communication at 84% (DP) and 95% (TP) of GPU kernel time, and per-call
+    NCCL times that match experiment 9's measured bandwidth.
 
 Experiments 1-4 and 6-9 ran successfully end-to-end and logged to MLflow —
 see [`training/README.md`](../training/README.md#results) for the
