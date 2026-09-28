@@ -8,7 +8,7 @@ workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
 
 ## Infrastructure as Code
 
-[`infra/`](infra/) has Terraform to reproduce the setup (network, mk8s cluster, GPU node group, shared filesystem, container registry, Object Storage logs bucket) from scratch in a Nebius project — applied and drift-free against the live PoC project. See its [README](infra/README.md).
+[`infra/`](infra/) has Terraform to reproduce the setup (network, mk8s cluster, GPU node group, shared filesystem, container registry, Object Storage logs bucket, plus flag-gated managed MLflow and the dashboard VM) from scratch in a Nebius project — applied and drift-free against the live PoC project. See its [README](infra/README.md).
 
 ## Cluster Validator
 
@@ -16,7 +16,9 @@ workload on it (16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem).
 
 ## Training (Option 1)
 
-[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) as if the future 2x8-GPU/InfiniBand cluster were live, mapping model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) then implements and runs a small, honest subset of that outline on the *current* live 2x1-GPU cluster — a real Data-Parallel vs. Tensor-Parallel comparison on Qwen3, logged to MLflow. See its [README](training/README.md#results) for the results.
+[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) as if the future 2x8-GPU/InfiniBand cluster were live, mapping model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) then implements and runs a small, honest subset of that outline on the *current* live 2x1-GPU cluster — single-variable experiments on Qwen3 covering DP, TP, PP, CP, EP, FP8, attention backend, CPU offloading, a cross-node NCCL bandwidth sweep, and Nsight Systems profiles, logged to MLflow. See its [README](training/README.md#results) for the results.
+
+[`dashboard/`](dashboard/) is a Streamlit app over those results (live from MLflow): strategy comparison, NCCL/Nsight communication view, and an analytical TP x PP x DP planner validated against the measured runs. Hosted on a Terraform-managed VM behind basic auth — see its [README](dashboard/README.md).
 
 ## Nebius MCP Server
 

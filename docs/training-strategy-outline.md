@@ -211,6 +211,13 @@ API directly on the same underlying Qwen3 model configs - same architecture
 and parallelism degrees, just not the newer named wrapper. See
 `training/README.md`'s "Container image" section.
 
+The sizing reasoning in this outline is also implemented as an interactive
+planner in the [dashboard](../dashboard/README.md)
+([`recommender.py`](../dashboard/recommender.py)): it ranks TP x PP x DP
+layouts for a given model/cluster/link bandwidth and is validated against
+the measured DP/TP/PP runs above (step time within ~17%, memory
+underestimated by ~8-23% since it ignores framework/allocator overhead).
+
 ## Deferred / stretch (not attempted this pass)
 
 Nothing left deliberately unattempted from the vacancy's list of topics -

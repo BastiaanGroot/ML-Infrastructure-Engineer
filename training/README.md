@@ -183,6 +183,11 @@ needed).
 
 ## Results
 
+All of the numbers below are also browsable in the
+[dashboard](../dashboard/README.md), which reads them live from MLflow
+(`steady_step_time_sec` / `steady_tflops_per_gpu` metrics, `run_kind` tag),
+alongside a TP x PP x DP planner checked against these runs.
+
 Eight of the nine runs (experiments 1-4, 4b, and 6-9) ran successfully
 end-to-end on the live 2-node cluster and logged to MLflow. Experiments
 1-4, 4b, and 6-8 each ran 20 training iterations + train/valid/test eval;
