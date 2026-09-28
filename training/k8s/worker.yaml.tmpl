@@ -90,6 +90,10 @@ spec:
               pip install --quiet mlflow-skinny
               cd /opt/Megatron-Bridge
               export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
+              # Privileged containers see every GPU on the node regardless of
+              # the allocation, so each pod claims the whole node (see limits)
+              # and uses only its first NPROC GPUs.
+              export CUDA_VISIBLE_DEVICES=$(seq -s, 0 $((${NPROC} - 1)))
               NODE_RANK=$JOB_COMPLETION_INDEX
               echo "=== ${NAME} - node-rank=$NODE_RANK ==="
               launch=(torchrun --nnodes=${NNODES} --nproc-per-node=${NPROC} --node-rank="$NODE_RANK"
@@ -104,4 +108,4 @@ spec:
               fi
           resources:
             limits:
-              nvidia.com/gpu: ${NPROC}
+              nvidia.com/gpu: 8
