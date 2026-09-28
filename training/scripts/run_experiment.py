@@ -101,11 +101,6 @@ def main() -> None:
         tensor_parallelism=args.tensor_parallelism,
         pipeline_parallelism=args.pipeline_parallelism,
         context_parallelism=args.context_parallelism,
-        # Sequence parallelism requires tensor_parallelism > 1 (Megatron-Core
-        # asserts otherwise) - the qwen3_30b_a3b MoE recipe defaults this to
-        # True even at tensor_parallelism=1, so override it explicitly here
-        # rather than relying on each recipe's default.
-        sequence_parallelism=args.tensor_parallelism > 1,
         train_iters=args.train_iters,
         global_batch_size=args.global_batch_size,
         micro_batch_size=args.micro_batch_size,
@@ -119,6 +114,12 @@ def main() -> None:
     )
     if is_moe:
         recipe_kwargs["expert_parallelism"] = args.expert_parallelism
+    # Sequence parallelism requires tensor_parallelism > 1 (Megatron-Core
+    # asserts otherwise), but the qwen3_30b_a3b MoE recipe defaults it to True
+    # regardless. Only force it off at TP=1; at TP>1 keep each recipe's own
+    # default (False for qwen3_1p7b) so experiment-02's documented config holds.
+    if args.tensor_parallelism == 1:
+        recipe_kwargs["sequence_parallelism"] = False
     cfg = recipes.pretrain_config(**recipe_kwargs)
 
     # Attention backend and CPU offloading aren't pretrain_config() kwargs in
