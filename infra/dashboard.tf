@@ -19,9 +19,9 @@ resource "nebius_mysterybox_v1_secret" "dashboard" {
   parent_id = var.project_id
   name      = "${var.cluster_name}-dashboard"
 
+  # The API only accepts secret_version at create time; changing the payload
+  # means replacing the secret.
   sensitive = {
-    # Bump to push payload changes (write-only fields aren't diffed).
-    version = "2"
     secret_version = {
       payload = [
         { key = "mlflow_password", string_value = random_password.mlflow_admin[0].result },
