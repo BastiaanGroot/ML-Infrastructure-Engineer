@@ -180,8 +180,10 @@ def main() -> None:
         cfg.model.recompute_method = "uniform"
         cfg.model.recompute_num_layers = 1
 
-    # No persistent storage mounted for this mock/demo run - checkpointing to
-    # local ephemeral storage only, and never triggers within train_iters.
+    # Throughput-only runs: no checkpoint (an 8B one is ~115 GB on the node's
+    # container disk, a 32B one wouldn't fit) and no validation/test passes.
+    cfg.checkpoint.save = None
+    cfg.train.eval_iters = 0
     cfg.logger.log_throughput = True
     cfg.logger.log_interval = 1
 
