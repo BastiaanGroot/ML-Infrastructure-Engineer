@@ -53,6 +53,7 @@ EXPERIMENTS = {
     "q8b-pp2": ({}, "run_experiment.py", f"{Q8B_BASE} --pipeline-parallelism 2"),
     "q8b-seq16k-baseline": ({}, "run_experiment.py", Q8B_LONG),
     "q8b-seq16k-cp2": ({}, "run_experiment.py", f"{Q8B_LONG} --context-parallelism 2"),
+    "q8b-seq16k-tp4": ({}, "run_experiment.py", Q8B_LONG.replace("--tensor-parallelism 2", "--tensor-parallelism 4")),
     "q8b-fp8": ({}, "run_experiment.py", f"{Q8B_BASE} --precision bf16_with_fp8_current_scaling_mixed"),
     "q8b-unfused-attn": ({}, "run_experiment.py", f"{Q8B_BASE} --attention-backend unfused"),
     "q8b-cpu-offload": ({}, "run_experiment.py", f"{Q8B_BASE} --cpu-offload"),
