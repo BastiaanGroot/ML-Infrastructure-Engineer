@@ -37,14 +37,8 @@ output "mlflow_admin_password" {
 }
 
 output "dashboard_url" {
-  description = "Dashboard URL (only set when enable_dashboard=true). Plain HTTP behind basic auth."
+  description = "Dashboard URL (only set when enable_dashboard=true). Plain HTTP, no authentication."
   value       = try("http://${split("/", nebius_compute_v1_instance.dashboard[0].status.network_interfaces[0].public_ip_address.address)[0]}", null)
-}
-
-output "dashboard_basic_auth_password" {
-  description = "Generated dashboard basic-auth password (user: dashboard_basic_auth_user). Also stored in the dashboard SecretStash secret."
-  value       = try(random_password.dashboard_basic_auth[0].result, null)
-  sensitive   = true
 }
 
 output "mlflow_tracking_endpoint" {

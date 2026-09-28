@@ -1,24 +1,17 @@
 # Streamlit dashboard VM (dashboard/): a small CPU VM that queries MLflow
 # live and serves the strategy comparison + parallelism planner over plain
-# HTTP behind Caddy basic auth. Off by default; requires enable_mlflow.
+# HTTP on port 80. Off by default; requires enable_mlflow.
 #
-# Credentials: Terraform writes the MLflow admin password and a generated
-# basic-auth password into a SecretStash secret (write-only, not kept in
-# state). The VM runs as dashboard-sa, which can read that one secret via a
-# group access permit, and fetches both at service start — nothing secret
-# is baked into cloud-init.
+# NOTE: no authentication — anyone with the URL can view the dashboard
+# (read-only MLflow data; the MLflow password itself never leaves the VM).
 #
-# NOTE: plain HTTP means the basic-auth password crosses the network
-# unencrypted. Acceptable for this PoC; put TLS in front for anything real.
+# Credentials: Terraform writes the MLflow admin password into a SecretStash
+# secret (write-only, not kept in state). The VM runs as dashboard-sa, which
+# can read that one secret via a group access permit, and fetches it at boot
+# — nothing secret is baked into cloud-init.
 
 locals {
   dashboard_count = var.enable_dashboard ? 1 : 0
-}
-
-resource "random_password" "dashboard_basic_auth" {
-  count   = local.dashboard_count
-  length  = 20
-  special = false
 }
 
 resource "nebius_mysterybox_v1_secret" "dashboard" {
@@ -27,10 +20,11 @@ resource "nebius_mysterybox_v1_secret" "dashboard" {
   name      = "${var.cluster_name}-dashboard"
 
   sensitive = {
+    # Bump to push payload changes (write-only fields aren't diffed).
+    version = "2"
     secret_version = {
       payload = [
         { key = "mlflow_password", string_value = random_password.mlflow_admin[0].result },
-        { key = "basic_auth_password", string_value = random_password.dashboard_basic_auth[0].result },
       ]
     }
   }
@@ -149,7 +143,6 @@ resource "nebius_compute_v1_instance" "dashboard" {
     secret_id           = nebius_mysterybox_v1_secret.dashboard[0].id
     mlflow_tracking_uri = "https://${nebius_msp_mlflow_v1alpha1_cluster.main[0].status.tracking_endpoint}"
     mlflow_username     = var.mlflow_admin_username
-    basic_auth_user     = var.dashboard_basic_auth_user
     git_repo_url        = var.dashboard_git_repo_url
     git_ref             = var.dashboard_git_ref
     ssh_public_key      = var.dashboard_ssh_public_key

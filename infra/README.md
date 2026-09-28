@@ -78,27 +78,25 @@ unset PASSWORD
 `enable_mlflow`) hosts the [Streamlit dashboard](../dashboard/README.md) on a
 `cpu-d3` VM that clones this public repo at boot:
 
-- Terraform stores the MLflow admin password and a generated basic-auth
-  password in a SecretStash secret (`ml-infra-poc-dashboard`, written via the
-  provider's write-only `sensitive` block, so not in state).
+- Terraform stores the MLflow admin password in a SecretStash secret
+  (`ml-infra-poc-dashboard`, written via the provider's write-only
+  `sensitive` block, so not in state).
 - The VM runs as `dashboard-sa`, whose group has `mysterybox.payload-viewer`
   on that one secret. At boot, `dashboard-secrets.service` gets the SA's token
-  from the instance metadata service and fetches both passwords with the
+  from the instance metadata service and fetches the password with the
   Nebius CLI — no secret is in cloud-init.
-- Streamlit listens on `127.0.0.1:8501`; Caddy on port 80 adds basic auth. A
-  dedicated security group only opens 80 (and 22 when
-  `dashboard_ssh_public_key` is set) — the network's default group allows
-  all ingress.
-- **Plain HTTP**: the basic-auth password crosses the network unencrypted.
-  Fine for this PoC; put TLS in front for anything real.
+- Streamlit serves port 80 directly. A dedicated security group only opens
+  80 (and 22 when `dashboard_ssh_public_key` is set) — the network's default
+  group allows all ingress.
+- **No authentication, plain HTTP**: anyone with the URL can view the
+  (read-only) dashboard. Fine for this PoC; add auth + TLS for anything real.
 - Changing cloud-init requires replacing the VM
   (`-replace='nebius_compute_v1_instance.dashboard[0]'`): Nebius only updates
   `user_data` on a stopped instance. The VM is stateless.
 
 ```bash
 terraform apply -var="enable_mlflow=true" -var="enable_dashboard=true"
-terraform output dashboard_url                   # user: admin
-terraform output -raw dashboard_basic_auth_password
+terraform output dashboard_url
 ```
 
 ## Logs bucket IAM (for cluster-validator log uploads)

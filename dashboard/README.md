@@ -21,8 +21,7 @@ Streamlit app over the Option 1 training experiments, reading MLflow live:
 
 `terraform apply -var="enable_mlflow=true" -var="enable_dashboard=true"` in
 [`infra/`](../infra/README.md#dashboard-vm) creates a CPU VM that serves it
-over plain HTTP behind basic auth (`terraform output dashboard_url`, user
-`admin`, password `terraform output -raw dashboard_basic_auth_password`).
+over plain HTTP with no authentication (`terraform output dashboard_url`).
 To deploy new commits of `main` to it:
 
 ```bash

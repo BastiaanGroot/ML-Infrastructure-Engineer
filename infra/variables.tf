@@ -137,12 +137,6 @@ variable "dashboard_preset" {
   default     = "4vcpu-16gb"
 }
 
-variable "dashboard_basic_auth_user" {
-  description = "HTTP basic-auth username for the dashboard (password is generated, see the dashboard_basic_auth_password output)."
-  type        = string
-  default     = "admin"
-}
-
 variable "dashboard_git_repo_url" {
   description = "Public git repo the dashboard VM clones to get dashboard/ and training/profiles/."
   type        = string
