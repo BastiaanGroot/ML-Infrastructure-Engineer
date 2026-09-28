@@ -1,7 +1,7 @@
 #cloud-config
-# Rendered by infra/dashboard.tf. Secrets are never in here: at every
-# dashboard.service start, fetch-secrets.sh authenticates as the VM's
-# service account (instance metadata token) and reads them from SecretStash.
+# Rendered by infra/dashboard.tf. Secrets are never in here: at boot,
+# dashboard-secrets.service authenticates as the VM's service account
+# (instance metadata token) and reads them from SecretStash.
 %{ if ssh_public_key != null ~}
 users:
   - name: ${ssh_user}
@@ -56,16 +56,28 @@ write_files:
       CADDY
       chmod 0644 /etc/caddy/Caddyfile
       systemctl --no-block reload-or-restart caddy
-  - path: /etc/systemd/system/dashboard.service
+  # Separate unit: systemd loads EnvironmentFile= before ExecStartPre= runs,
+  # so the env file must already exist when dashboard.service starts.
+  - path: /etc/systemd/system/dashboard-secrets.service
     content: |
       [Unit]
-      Description=Streamlit parallelism dashboard
+      Description=Fetch dashboard secrets from SecretStash
       Wants=network-online.target
       After=network-online.target
 
       [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/opt/dashboard/fetch-secrets.sh
+  - path: /etc/systemd/system/dashboard.service
+    content: |
+      [Unit]
+      Description=Streamlit parallelism dashboard
+      Requires=dashboard-secrets.service
+      After=network-online.target dashboard-secrets.service
+
+      [Service]
       User=dashboard
-      ExecStartPre=+/opt/dashboard/fetch-secrets.sh
       EnvironmentFile=/run/dashboard/env
       WorkingDirectory=/opt/dashboard/repo
       ExecStart=/opt/dashboard/venv/bin/streamlit run dashboard/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --browser.gatherUsageStats false
@@ -82,4 +94,5 @@ runcmd:
   - /opt/dashboard/venv/bin/pip install -q -r /opt/dashboard/repo/dashboard/requirements.txt
   - HOME=/root bash -c 'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash'
   - systemctl daemon-reload
+  - systemctl enable dashboard-secrets
   - systemctl enable --now dashboard
