@@ -1,0 +1,85 @@
+#cloud-config
+# Rendered by infra/dashboard.tf. Secrets are never in here: at every
+# dashboard.service start, fetch-secrets.sh authenticates as the VM's
+# service account (instance metadata token) and reads them from SecretStash.
+%{ if ssh_public_key != null ~}
+users:
+  - name: ${ssh_user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+%{ endif ~}
+package_update: true
+packages:
+  - caddy
+  - git
+  - python3-venv
+
+write_files:
+  - path: /opt/dashboard/fetch-secrets.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      # Fetch MLflow + basic-auth passwords from SecretStash as the VM's
+      # service account, write them to tmpfs, and (re)configure Caddy.
+      set -euo pipefail
+      install -d -m 0700 /run/dashboard
+      token=$(curl -sf -H "Metadata: true" http://metadata.nebius.internal/v1/iam/sa/token/access_token)
+      case "$token" in
+        "{"*) token=$(printf '%s' "$token" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])') ;;
+      esac
+      export NEBIUS_IAM_TOKEN=$(printf '%s' "$token" | tr -d '\n\r')
+      get_secret() {
+        # CLI prints a "token from ... is used" line before the JSON.
+        /root/.nebius/bin/nebius mysterybox payload get-by-key \
+          --secret-id ${secret_id} --key "$1" --format json > /run/dashboard/raw.json
+        python3 -c 'import json,sys; t=open(sys.argv[1]).read(); d=json.loads(t[t.index("{"):]); print(d.get("string_value") or d["data"]["string_value"])' /run/dashboard/raw.json
+        rm -f /run/dashboard/raw.json
+      }
+      mlflow_password=$(get_secret mlflow_password)
+      basic_auth_password=$(get_secret basic_auth_password)
+      umask 077
+      cat > /run/dashboard/env <<ENV
+      MLFLOW_TRACKING_URI='${mlflow_tracking_uri}'
+      MLFLOW_TRACKING_USERNAME='${mlflow_username}'
+      MLFLOW_TRACKING_PASSWORD='$mlflow_password'
+      ENV
+      hash=$(caddy hash-password --plaintext "$basic_auth_password")
+      cat > /etc/caddy/Caddyfile <<CADDY
+      :80 {
+        basicauth {
+          ${basic_auth_user} $hash
+        }
+        reverse_proxy 127.0.0.1:8501
+      }
+      CADDY
+      chmod 0644 /etc/caddy/Caddyfile
+      systemctl --no-block reload-or-restart caddy
+  - path: /etc/systemd/system/dashboard.service
+    content: |
+      [Unit]
+      Description=Streamlit parallelism dashboard
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=dashboard
+      ExecStartPre=+/opt/dashboard/fetch-secrets.sh
+      EnvironmentFile=/run/dashboard/env
+      WorkingDirectory=/opt/dashboard/repo
+      ExecStart=/opt/dashboard/venv/bin/streamlit run dashboard/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --browser.gatherUsageStats false
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - useradd --system --create-home --home-dir /var/lib/dashboard dashboard
+  - git clone --depth 1 --branch ${git_ref} ${git_repo_url} /opt/dashboard/repo
+  - python3 -m venv /opt/dashboard/venv
+  - /opt/dashboard/venv/bin/pip install -q -r /opt/dashboard/repo/dashboard/requirements.txt
+  - HOME=/root bash -c 'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash'
+  - systemctl daemon-reload
+  - systemctl enable --now dashboard

@@ -113,6 +113,48 @@ variable "mlflow_size" {
   default     = null
 }
 
+variable "enable_dashboard" {
+  description = "Whether to create the Streamlit dashboard VM (see infra/dashboard.tf). Requires enable_mlflow=true."
+  type        = bool
+  default     = false
+}
+
+variable "dashboard_platform" {
+  description = "CPU compute platform for the dashboard VM."
+  type        = string
+  default     = "cpu-d3"
+}
+
+variable "dashboard_preset" {
+  description = "Resource preset for the dashboard VM."
+  type        = string
+  default     = "4vcpu-16gb"
+}
+
+variable "dashboard_basic_auth_user" {
+  description = "HTTP basic-auth username for the dashboard (password is generated, see the dashboard_basic_auth_password output)."
+  type        = string
+  default     = "admin"
+}
+
+variable "dashboard_git_repo_url" {
+  description = "Public git repo the dashboard VM clones to get dashboard/ and training/profiles/."
+  type        = string
+  default     = "https://github.com/BastiaanGroot/ML-Infrastructure-Engineer.git"
+}
+
+variable "dashboard_git_ref" {
+  description = "Branch or tag of dashboard_git_repo_url to deploy."
+  type        = string
+  default     = "main"
+}
+
+variable "dashboard_ssh_public_key" {
+  description = "Optional SSH public key for the dashboard VM (user node_group_ssh_user). If unset, no SSH user is created and port 22 stays closed."
+  type        = string
+  default     = null
+}
+
 variable "logs_bucket_retention_days" {
   description = "Days before an object in the logs bucket (cluster-validator summary.json etc.) auto-expires, via the bucket's lifecycle_configuration."
   type        = number
