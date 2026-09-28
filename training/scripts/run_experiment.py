@@ -8,18 +8,19 @@ native MLflow LoggerConfig integration (both added upstream since) - so we
 call the model's pretrain_config() recipe function directly and log the
 handful of metrics we care about ourselves. See ../README.md.
 
-Covers all distributed/hardware knobs used across ../k8s/experiment-*.yaml:
+Covers all distributed/hardware knobs used in ../launch.py's matrix:
 TP/PP/CP/EP parallelism degrees, --precision (bf16 vs FP8 mixed-precision
-recipes), --attention-backend (flash/fused/unfused/local/auto), and
---cpu-offload (activation CPU offloading). All confirmed against the pinned
-Megatron-Bridge 0.1.0rc4 API via a debug pod - see git history for details.
+recipes), --attention-backend (flash/fused/unfused/local/auto),
+--cpu-offload (activation CPU offloading) and --recompute (full activation
+recomputation). All confirmed against the pinned Megatron-Bridge 0.1.0rc4
+API via a debug pod - see git history for details.
 
-Usage (invoked by torchrun from the K8s Pod manifests in ../k8s/):
-    torchrun --nnodes=2 --nproc-per-node=1 --node-rank=$NODE_RANK \
+Usage (invoked by torchrun from ../k8s/worker.yaml.tmpl via ../launch.py):
+    torchrun --nnodes=2 --nproc-per-node=8 --node-rank=$NODE_RANK \
         --master-addr=$MASTER_ADDR --master-port=$MASTER_PORT \
-        run_experiment.py --model qwen3-1p7b --tensor-parallelism 1 \
-        --train-iters 20 --global-batch-size 4 --micro-batch-size 2 \
-        --approx-num-params 1.7e9 --mlflow-run-name dp-baseline-qwen3-1p7b
+        run_experiment.py --model qwen3-8b --tensor-parallelism 2 \
+        --global-batch-size 64 --micro-batch-size 1 \
+        --approx-num-params 8.2e9 --mlflow-run-name q8b-baseline
 """
 
 import argparse
@@ -56,17 +57,19 @@ def capture_step_logs() -> list[tuple[float, float]]:
     train_utils.print_rank_0 = print_and_capture
     return steps
 
-# H200 SXM tensor-core peaks per NVIDIA's datasheet - used only as the
+# H100 SXM dense tensor-core peaks per NVIDIA's datasheet - used only as the
 # denominator for the approximate MFU estimate below. FP8 dense peak is ~2x
 # bf16 on Hopper, so we pick the right one based on --precision.
-H200_BF16_PEAK_FLOPS_PER_GPU = 989e12
-H200_FP8_PEAK_FLOPS_PER_GPU = 1979e12
+H100_BF16_PEAK_FLOPS_PER_GPU = 989e12
+H100_FP8_PEAK_FLOPS_PER_GPU = 1979e12
+CLUSTER_TAGS = {"cluster": "2x8-h100-ib", "gpu": "H100"}
 
 # module path, HF id, is_moe (whether the recipe's pretrain_config() accepts
 # expert_parallelism - true only for the qwen3_*_a3b sparse/MoE recipes).
 MODEL_RECIPES = {
     "qwen3-1p7b": ("megatron.bridge.recipes.qwen.qwen3_1p7b", "Qwen/Qwen3-1.7B", False),
-    "qwen3-4b": ("megatron.bridge.recipes.qwen.qwen3_4b", "Qwen/Qwen3-4B", False),
+    "qwen3-8b": ("megatron.bridge.recipes.qwen.qwen3_8b", "Qwen/Qwen3-8B", False),
+    "qwen3-32b": ("megatron.bridge.recipes.qwen.qwen3_32b", "Qwen/Qwen3-32B", False),
     "qwen3-30b-a3b": ("megatron.bridge.recipes.qwen.qwen3_30b_a3b", "Qwen/Qwen3-30B-A3B", True),
 }
 
@@ -103,6 +106,11 @@ def parse_args() -> argparse.Namespace:
         "--cpu-offload",
         action="store_true",
         help="Enable activation CPU offloading (model.cpu_offloading*) for all layers.",
+    )
+    parser.add_argument(
+        "--recompute",
+        action="store_true",
+        help="Full activation recomputation for every layer (trades ~1/3 more compute for activation memory).",
     )
     parser.add_argument(
         "--approx-num-params",
@@ -167,6 +175,10 @@ def main() -> None:
         # Megatron-Core requires cpu_offloading_num_layers < num_layers
         # (strictly less, not <=) - offload all-but-one layer's activations.
         cfg.model.cpu_offloading_num_layers = cfg.model.num_layers - 1
+    if args.recompute:
+        cfg.model.recompute_granularity = "full"
+        cfg.model.recompute_method = "uniform"
+        cfg.model.recompute_num_layers = 1
 
     # No persistent storage mounted for this mock/demo run - checkpointing to
     # local ephemeral storage only, and never triggers within train_iters.
@@ -195,7 +207,7 @@ def main() -> None:
     # param count) for achieved FLOPs/sec, divided by (world_size x per-GPU
     # peak) for MFU. Approximate - see --approx-num-params help above.
     achieved_flops_per_sec = 6 * args.approx_num_params * total_tokens / elapsed_sec
-    peak_flops_per_gpu = H200_FP8_PEAK_FLOPS_PER_GPU if "fp8" in args.precision else H200_BF16_PEAK_FLOPS_PER_GPU
+    peak_flops_per_gpu = H100_FP8_PEAK_FLOPS_PER_GPU if "fp8" in args.precision else H100_BF16_PEAK_FLOPS_PER_GPU
     mfu = achieved_flops_per_sec / (world_size * peak_flops_per_gpu)
 
     metrics = {
@@ -228,7 +240,10 @@ def main() -> None:
         "precision": args.precision,
         "attention_backend": args.attention_backend or "default",
         "cpu_offload": args.cpu_offload,
+        "recompute": args.recompute,
         "approx_num_params": args.approx_num_params,
+        "nnodes": world_size // int(os.environ["LOCAL_WORLD_SIZE"]),
+        "gpus_per_node": int(os.environ["LOCAL_WORLD_SIZE"]),
     }
 
     print(f"=== Results: {metrics} ===")
@@ -236,7 +251,7 @@ def main() -> None:
 
     mlflow.set_experiment(args.mlflow_experiment)
     with mlflow.start_run(run_name=args.mlflow_run_name):
-        mlflow.set_tags({"run_kind": args.run_kind})
+        mlflow.set_tags({"run_kind": args.run_kind, **CLUSTER_TAGS})
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
         for iteration, (step_time, tflops) in enumerate(steps, start=1):

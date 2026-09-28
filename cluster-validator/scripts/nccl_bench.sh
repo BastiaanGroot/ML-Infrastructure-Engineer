@@ -3,10 +3,8 @@
 # already bundled in the base image (see Dockerfile).
 #
 # This checks single-node interconnect (NVLink/PCIe between local GPUs).
-# For multi-node InfiniBand validation, launch this binary directly via an
-# MPIJob instead of through this container's entrypoint - see
-# k8s/job-nccl-multinode.yaml and the README for the pattern (matches
-# https://docs.nebius.com/kubernetes/gpu/nccl-test).
+# Cross-node InfiniBand bandwidth is measured by training/'s NCCL sweep
+# (training/launch.py nccl-16gpu-ib / nccl-2gpu-ib).
 #
 # Env vars:
 #   NCCL_BENCH_ARGS      - override args passed to all_reduce_perf.

@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
-"""Cross-node NCCL all_reduce bandwidth sweep.
+"""NCCL all_reduce bandwidth sweep over whatever ranks torchrun starts.
 
-Every TP/PP/CP takeaway in ../README.md refers qualitatively to "no
-InfiniBand hurts cross-node communication" - this script measures that
-directly instead of just asserting it: real GB/s for torch.distributed
-all_reduce(SUM) across the same two live compute nodes the training
-experiments run on, standard cloud Ethernet (no InfiniBand), swept across
-message sizes from 1 MiB to 1 GiB.
-
-Pure torch.distributed + NCCL - doesn't touch Megatron-Bridge or the model
-at all. Launched the same way as run_experiment.py (torchrun --nnodes=2
---nproc-per-node=1) so it reuses the same headless-Service rendezvous setup
-as every other experiment - see ../k8s/experiment-09-nccl-bandwidth.yaml
-and ../README.md.
+Measures the links the training experiments' parallelism groups actually
+use: NVLink within a node (1 node x 8 GPUs), InfiniBand across nodes
+(2 nodes x 1 GPU, or all 2 x 8 GPUs), swept from 1 MiB to 1 GiB. Pure
+torch.distributed + NCCL, no model. Launched via ../launch.py like every
+other experiment (see its nccl-* entries).
 
 For each size: warmup iters (untimed, lets NCCL pick/cache its algorithm),
 then timed iters wrapped in torch.cuda.synchronize() + a dist.barrier()
-before/after so both ranks start and stop together and we're timing the
+before/after so all ranks start and stop together and we're timing the
 collective itself, not queuing or rendezvous overhead.
 
-Reports "algorithm bandwidth" (nccl-tests terminology): bytes moved / time,
-in GB/s (decimal, i.e. 1e9 bytes/s - NCCL's own convention). For a 2-rank
-all_reduce specifically, nccl-tests' other column ("bus bandwidth", which
-accounts for the ring algorithm's 2*(n-1)/n data-movement multiplier over N
-ranks) is numerically identical to algbw since 2*(2-1)/2 == 1 - so there's
-only one meaningful number to report here, not two.
+Reports nccl-tests' two numbers, in decimal GB/s: "algorithm bandwidth"
+(bytes / time) and "bus bandwidth" (algbw x 2(n-1)/n, the per-link rate a
+ring all-reduce over n ranks needs - comparable across rank counts and to
+the hardware's link speed). For n=2 they're identical.
 """
 
 import argparse
@@ -71,10 +62,12 @@ def main() -> None:
 
         mlflow.set_experiment("qwen3-parallelism-experiments")
         mlflow_run = mlflow.start_run(run_name=args.mlflow_run_name)
+        mlflow.set_tags({"run_kind": "benchmark", "cluster": "2x8-h100-ib", "gpu": "H100"})
         mlflow.log_params(
             {
                 "sweep_type": "nccl_allreduce_bandwidth",
                 "world_size": os.environ["WORLD_SIZE"],
+                "gpus_per_node": os.environ["LOCAL_WORLD_SIZE"],
                 "warmup_iters": args.warmup_iters,
                 "timed_iters": args.timed_iters,
             }
@@ -100,23 +93,27 @@ def main() -> None:
         avg_time_sec = elapsed / args.timed_iters
         bytes_moved = n_elems * 4
         algbw_gbps = (bytes_moved / avg_time_sec) / 1e9
+        world_size = dist.get_world_size()
+        busbw_gbps = algbw_gbps * 2 * (world_size - 1) / world_size
 
         if rank == 0:
             print(
                 f"size={size_mb:>5} MiB  avg_time={avg_time_sec * 1e3:8.3f} ms  "
-                f"algbw={algbw_gbps:7.2f} GB/s"
+                f"algbw={algbw_gbps:7.2f} GB/s  busbw={busbw_gbps:7.2f} GB/s"
             )
             results.append(
                 {
                     "size_mb": size_mb,
                     "avg_time_ms": avg_time_sec * 1e3,
                     "algbw_gbps": algbw_gbps,
+                    "busbw_gbps": busbw_gbps,
                 }
             )
             if mlflow_run is not None:
                 import mlflow
 
                 mlflow.log_metric("algbw_gbps", algbw_gbps, step=size_mb)
+                mlflow.log_metric("busbw_gbps", busbw_gbps, step=size_mb)
                 mlflow.log_metric("avg_time_ms", avg_time_sec * 1e3, step=size_mb)
 
     if rank == 0 and args.output:

@@ -39,7 +39,7 @@ spec:
               value: "ml-infra-poc-logs"
           resources:
             limits:
-              nvidia.com/gpu: 1
+              nvidia.com/gpu: 8
           volumeMounts:
             - name: network-disk
               mountPath: /mnt/network-disk
