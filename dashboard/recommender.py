@@ -2,8 +2,8 @@
 
 Enumerates (TP, PP, DP) layouts for a GPU count, estimates per-GPU memory and
 per-step communication, and ranks the layouts that fit. The communication
-model is the one checked against this repo's real runs (training/README.md,
-Takeaway 9): per-collective bytes divided by the bandwidth of the slowest
+model is checked against this repo's real runs in the dashboard's planner
+tab: per-collective bytes divided by the bandwidth of the slowest
 link the collective's group spans.
 
 Deliberately simple: no CP/EP, no virtual pipeline stages, 1F1B schedule,

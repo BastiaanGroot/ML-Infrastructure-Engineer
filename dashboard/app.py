@@ -21,7 +21,11 @@ import recommender as rec
 
 REPO = Path(__file__).resolve().parents[1]
 EXPERIMENT = "qwen3-parallelism-experiments"
-H200_BF16_PEAK_TFLOPS = 989
+H100_BF16_PEAK_TFLOPS = 989
+# Measured on this cluster (training/README.md): NVLink all_reduce bus
+# bandwidth inside a node, and one GPU's InfiniBand NIC between nodes.
+NVLINK_GBPS = 468
+IB_PER_GPU_GBPS = 46
 
 st.set_page_config(page_title="Qwen3 parallelism on Nebius", layout="wide")
 
@@ -50,8 +54,14 @@ def strategy_label(row: pd.Series) -> str:
         parts.append(f"{row['params.attention_backend']} attn")
     if row.get("params.cpu_offload") == "True":
         parts.append("CPU offload")
+    if row.get("params.recompute") == "True":
+        parts.append("recompute")
     if row.get("params.seq_length") not in (None, "4096"):
         parts.append(f"seq {row['params.seq_length']}")
+    if row.get("params.nnodes") == "1":
+        parts.append("1 node")
+    elif row.get("params.gpus_per_node") not in (None, "8"):
+        parts.append(f"{row['params.gpus_per_node']} GPUs/node")
     return " + ".join(parts) or "single GPU"
 
 
@@ -88,24 +98,25 @@ def bar(df: pd.DataFrame, value: str, title: str) -> alt.Chart:
 def comparison_tab(runs: pd.DataFrame) -> None:
     kinds = st.multiselect(
         "Run kinds", sorted(runs["run_kind"].unique()), default=["experiment"],
-        help="'profile' runs ran under nsys (~8-10% overhead); 'superseded' is "
-        "the early Qwen3-4B TP run, replaced by a same-model comparison.",
+        help="'profile' runs ran under nsys (~8-10% overhead); 'legacy' are the "
+        "earlier Qwen3-1.7B runs on 2 nodes x 1 H200 over 2.35 GB/s Ethernet.",
     )
     df = runs[runs["run_kind"].isin(kinds) & runs["metrics.steady_tflops_per_gpu"].notna()].copy()
     if df.empty:
         st.info("No runs with steady-state metrics for the selected kinds.")
         return
-    df["strategy"] = df.apply(strategy_label, axis=1)
     df["model"] = df["params.model"]
+    df["strategy"] = df["model"] + ": " + df.apply(strategy_label, axis=1)
     df["tflops"] = df["metrics.steady_tflops_per_gpu"]
-    df["mfu_pct"] = 100 * df["tflops"] / H200_BF16_PEAK_TFLOPS
+    df["mfu_pct"] = 100 * df["tflops"] / H100_BF16_PEAK_TFLOPS
     df["step_s"] = df["metrics.steady_step_time_sec"]
     df["memory_gb"] = df["metrics.peak_gpu_memory_gb"]
 
     st.caption(
-        "Steady-state = iterations 2-20. Each run changes one setting from its "
-        "baseline (DP=2 at seq 4096, or DP=2 at seq 16384 for CP). MFU is vs "
-        "the H200 bf16 dense peak (989 TFLOP/s) for every run, including FP8."
+        "Steady-state = iterations 2-20 on 16 GPUs. Qwen3-8B runs change one "
+        "setting from the TP2 x DP8 baseline (seq 4096, or seq 16384 for CP). "
+        "MoE runs count active parameters only. MFU is vs the H100 bf16 dense "
+        "peak (989 TFLOP/s) for every run, including FP8."
     )
     left, right = st.columns(2)
     left.altair_chart(bar(df, "tflops", "Throughput per GPU (TFLOP/s)"), width="stretch")
@@ -126,41 +137,43 @@ def comparison_tab(runs: pd.DataFrame) -> None:
         st.subheader("Per-iteration step time")
         st.altair_chart(
             alt.Chart(pd.concat(histories)).mark_line(point=True).encode(
-                x=alt.X("step:Q", title="iteration"), y=alt.Y("value:Q", title="step time (s)"),
+                x=alt.X("step:Q", title="iteration"),
+                y=alt.Y("value:Q", title="step time (s)", scale=alt.Scale(type="log")),
                 color="run:N",
             ),
             width="stretch",
         )
-    else:
-        st.caption(
-            "Per-iteration series are logged by runs made after the steady-state "
-            "logging change; the runs shown here predate it (steady-state values "
-            "backfilled from their pod logs)."
-        )
 
 
 def communication_tab(runs: pd.DataFrame) -> None:
-    st.subheader("Cross-node NCCL all_reduce bandwidth (experiment 9)")
-    bench = runs[runs["run_kind"] == "benchmark"]
+    st.subheader("NCCL all_reduce bus bandwidth")
+    bench = runs[runs["run_kind"] == "benchmark"].drop_duplicates("run_name", keep="last")
     if not bench.empty:
-        bw = metric_history(bench.iloc[-1]["run_id"], "algbw_gbps").rename(columns={"step": "size_mib"})
+        bw = pd.concat([
+            metric_history(r.run_id, "busbw_gbps").assign(run=r.run_name) for r in bench.itertuples()
+        ]).rename(columns={"step": "size_mib"})
         st.altair_chart(
             alt.Chart(bw).mark_line(point=True).encode(
                 x=alt.X("size_mib:Q", scale=alt.Scale(type="log"), title="message size (MiB)"),
-                y=alt.Y("value:Q", title="algorithm bandwidth (GB/s)"),
-                tooltip=["size_mib", alt.Tooltip("value:Q", format=".2f")],
+                y=alt.Y("value:Q", title="bus bandwidth (GB/s)"),
+                color=alt.Color("run:N", legend=alt.Legend(orient="bottom")),
+                tooltip=["run", "size_mib", alt.Tooltip("value:Q", format=".1f")],
             ),
             width="stretch",
         )
         st.caption(
-            "Plateaus at ~2.3-2.4 GB/s (~19 Gbit/s): plain Ethernet between the "
-            "two nodes, no InfiniBand. InfiniBand gives ~40-50 GB/s per GPU; "
-            "NVLink inside an H100 node ~360+ GB/s."
+            f"At 1 GiB: ~{NVLINK_GBPS} GB/s over NVLink inside a node (8 GPUs), "
+            "~442 GB/s across both nodes (16 GPUs, NVLink + 8 InfiniBand NICs "
+            f"per node), and ~{IB_PER_GPU_GBPS} GB/s for one GPU per node over a "
+            "single 400 Gb/s NIC. The earlier Ethernet PoC measured 2.35 GB/s."
         )
 
     st.subheader("Where GPU time goes: Nsight Systems kernel breakdown")
     summarize = load_summarize_kernels()
-    labels = {"dp": "DP=2", "tp": "TP=2", "tp-seqpar": "TP=2 + sequence parallel"}
+    labels = {
+        "q8b-baseline": "Qwen3-8B TP2 x DP8 (TP over NVLink)",
+        "q8b-tp8-2nodes": "Qwen3-8B TP8 x DP1, 4 GPUs/node (TP over InfiniBand)",
+    }
     rows = []
     for path in sorted((REPO / "training" / "profiles").glob("*-cuda_gpu_kern_sum.txt")):
         key = path.name.removesuffix("-cuda_gpu_kern_sum.txt")
@@ -182,8 +195,8 @@ def communication_tab(runs: pd.DataFrame) -> None:
         )
         st.caption(
             "NCCL kernels run on their own stream and overlap with compute, so "
-            "these are shares of summed kernel time, not wall time. Per-call NCCL "
-            "times match the measured bandwidth above (training/README.md, Takeaway 9)."
+            "these are shares of summed kernel time, not wall time (training/README.md, "
+            "\"Nsight profiles\")."
         )
 
 
@@ -205,7 +218,8 @@ def planner_tab() -> None:
         gpus_per_node = st.selectbox("GPUs per node", [1, 8], index=1)
         link = st.selectbox(
             "Inter-node link",
-            ["InfiniBand (~40 GB/s per GPU)", "Ethernet, as measured here (2.35 GB/s)"],
+            [f"InfiniBand, as measured here ({IB_PER_GPU_GBPS} GB/s per GPU)",
+             "Ethernet, as measured on the earlier PoC (2.35 GB/s)"],
         )
     with c3:
         st.markdown("**Workload**")
@@ -218,7 +232,8 @@ def planner_tab() -> None:
     cluster = rec.Cluster(
         nodes=nodes, gpus_per_node=gpus_per_node,
         hbm_gb=80 if gpu.startswith("H100") else 141, peak_tflops=989,
-        intra_node_gbps=360, inter_node_gbps=40 if link.startswith("Infini") else 2.35,
+        intra_node_gbps=NVLINK_GBPS,
+        inter_node_gbps=IB_PER_GPU_GBPS if link.startswith("Infini") else 2.35,
     )
     workload = rec.Workload(seq, micro, global_batch, mfu, recompute)
     plans = rec.rank_plans(model, cluster, workload)
@@ -251,29 +266,40 @@ def planner_tab() -> None:
     )
 
     with st.expander("How well does this model match our real runs?"):
-        poc = rec.Cluster(2, 1, 141, 989, 360, 2.35)
-        qwen = rec.PRESET_MODELS[0]
-        checks = [("DP=2", 1, 1, 4, 2, 2.29, 53.3), ("TP=2", 2, 1, 2, 2, 1.73, 33.8), ("PP=2", 1, 2, 4, 1, 1.00, 28.2)]
-        st.dataframe(pd.DataFrame([
-            {
-                "run": name, "measured step (s)": step,
-                "predicted step (s)": rec.plan(qwen, poc, rec.Workload(4096, mb, gb, 0.10), tp, pp).step_s,
-                "measured memory (GB)": mem,
-                "predicted memory (GB)": rec.plan(qwen, poc, rec.Workload(4096, mb, gb, 0.10), tp, pp).memory_gb,
-            }
-            for name, tp, pp, gb, mb, step, mem in checks
-        ]).style.format(precision=2), hide_index=True, width="stretch")
+        poc = rec.Cluster(2, 8, 80, H100_BF16_PEAK_TFLOPS, NVLINK_GBPS, IB_PER_GPU_GBPS)
+        models = {m.name: m for m in rec.PRESET_MODELS}
+        workload = rec.Workload(4096, 1, 64, 0.45)
+        checks = [
+            ("q8b-baseline", "Qwen3-8B", 2, 1, 1.94, 49.2),
+            ("q8b-dp16 (OOM)", "Qwen3-8B", 1, 1, None, None),
+            ("q8b-pp2", "Qwen3-8B", 2, 2, 2.29, 33.2),
+            ("q8b-tp4-dp4", "Qwen3-8B", 4, 1, 2.60, 30.2),
+            ("q8b-tp8-dp2", "Qwen3-8B", 8, 1, 5.06, 20.7),
+            ("q32b-tp4-pp2-dp2", "Qwen3-32B", 4, 2, 10.69, 52.8),
+            ("q32b-tp8-pp2-dp1", "Qwen3-32B", 8, 2, 14.79, 40.2),
+        ]
+        rows = []
+        for run, model_name, tp, pp, step, mem in checks:
+            p = rec.plan(models[model_name], poc, workload, tp, pp)
+            rows.append({
+                "run": run, "layout": p.label, "measured step (s)": step, "predicted step (s)": p.step_s,
+                "measured memory (GB)": mem, "predicted memory (GB)": p.memory_gb,
+            })
+        st.dataframe(pd.DataFrame(rows).style.format(precision=2), hide_index=True, width="stretch")
         st.caption(
-            "Qwen3-1.7B on this PoC (2 nodes x 1 H200, 2.35 GB/s), assumed MFU 0.10. "
-            "Step time is within about -4% to +17% and ranks the three strategies "
-            "correctly; memory is underestimated by 7-22% (CUDA context, allocator "
-            "fragmentation and temporary buffers aren't modelled)."
+            "Runs on this cluster (2 nodes x 8 H100, measured NVLink/IB bandwidth), "
+            "micro-batch 1, global batch 64, seq 4096, assumed MFU 0.45. The ranking "
+            "matches for both models. TP1-TP4 step times are within about 25%, but "
+            "TP8 is underestimated by ~2x: the model keeps MFU constant, while in "
+            "reality each GPU's GEMMs shrink with TP. Memory is off by -27% to +16% "
+            "and puts DP16 just under 80 GB, where it really OOMs, so treat anything "
+            "within ~20% of HBM as not fitting."
         )
 
 
 st.title("Qwen3 distributed training on Nebius")
 st.caption(
-    "Live from the PoC's managed MLflow. Two nodes x 1 H200, Megatron-Bridge "
+    "Live from the PoC's managed MLflow. Two nodes x 8 H100 on InfiniBand, Megatron-Bridge "
     "(nvcr.io/nvidia/nemo:25.09). Details: training/README.md in the repo."
 )
 if not os.environ.get("MLFLOW_TRACKING_URI"):
