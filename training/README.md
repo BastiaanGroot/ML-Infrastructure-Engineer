@@ -29,9 +29,11 @@ browsable in the [dashboard](../dashboard/README.md).
   and uses only its first `NPROC` GPUs.
 - **[`launch.py`](launch.py)** holds the experiment matrix, regenerates the
   ConfigMap, renders the template and applies it.
-- **Workload**: synthetic (`mock=True`) data, 20 iterations, no LR warmup, no
-  checkpoint or eval passes. These runs measure parallelism mechanics
-  (throughput, memory, communication), not convergence. Metrics are
+- **Workload**: the strategy experiments use synthetic (`mock=True`) data,
+  20 iterations, no LR warmup, no checkpoint or eval passes. They measure
+  parallelism mechanics (throughput, memory, communication), not
+  convergence. The [end-to-end run](#end-to-end-run-qwen3-17b-on-fineweb-edu)
+  trains on real data with checkpoints. Metrics are
   steady-state averages over iterations 2-20, from Megatron's own
   per-iteration log (`steady_step_time_sec`, `steady_tflops_per_gpu`).
   MFU is against the H100's 989 TFLOP/s bf16 dense peak.
@@ -57,6 +59,57 @@ Profile runs (`prof-*`) wrap node rank 0 in `nsys profile` and print the
 `cuda_gpu_kern_sum` table at the end of its log. Copy it into
 [`profiles/`](profiles/), then summarize it with
 `python3 scripts/summarize_kernels.py profiles/*.txt`.
+
+## End-to-end run: Qwen3-1.7B on FineWeb-Edu
+
+`e2e-q1p7b` pretrains Qwen3-1.7B from scratch across both nodes (DP16) on
+real text, with checkpoints, to show the whole path a customer training run
+takes: data on shared storage, a falling loss curve, and recovery from a
+failure.
+
+```bash
+kubectl apply -f k8s/prepare-data.yaml   # once: ~5 min
+kubectl logs -f job/prepare-data
+./launch.py e2e-q1p7b                    # ~40 min
+```
+
+1. **Data** ([`k8s/prepare-data.yaml`](k8s/prepare-data.yaml)): two shards
+   of [FineWeb-Edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu)
+   `sample-10BT` (1.455M documents) are downloaded to a 2Ti network-disk PVC,
+   then tokenized with the Qwen3 tokenizer into Megatron's indexed format on
+   the shared filesystem: 1.49B tokens, 5.6 GB. It takes 5 minutes on
+   64 CPU cores of one GPU node.
+2. **Training**: global batch 256 x 4096 tokens, 1000 iterations (1.05B
+   tokens, about one epoch), 50 warmup iterations, cosine decay from
+   3e-4 to 3e-5. Both nodes read the dataset from the shared filesystem.
+   The loss is logged to MLflow live from the last rank (tag
+   `run_kind=e2e`).
+3. **Checkpoints**: every 250 iterations to
+   `/mnt/shared-fs/checkpoints/e2e-q1p7b` (Megatron `torch_dist` format,
+   every rank writes its shard in parallel). Each is 22.4 GB (bf16 weights
+   plus fp32 master weights and Adam states) and takes about 17 s, less than
+   1% of the run at this interval.
+4. **Failure and resume**: the Job was deleted at iteration 519, 19
+   iterations after the iteration-500 checkpoint, to simulate a node
+   failure. Re-running `./launch.py e2e-q1p7b` loaded that checkpoint and
+   was training again at iteration 501 65 s later, including a 22 s first
+   iteration. The MLflow run continued as the same run. Iterations 501-519
+   ran twice and produced identical losses both times (4.231 at 501, 4.169
+   at 519), so data order and optimizer state were restored exactly.
+
+| Iteration | 1 | 50 | 100 | 250 | 500 | 750 | 1000 |
+|---|---|---|---|---|---|---|---|
+| Training loss | 12.32 | 7.27 | 6.53 | 5.35 | 4.24 | 3.86 | **3.68** |
+
+Steady state: **2.09 s** per iteration, **368 TFLOP/s/GPU** (32% MFU),
+31.3k tokens/s per GPU (502k tokens/s for the cluster), 44.3 GB peak
+memory. That matches the synthetic-data `q1p7b-dp16` run (349 TFLOP/s at
+global batch 32), so real data loading from the shared filesystem costs no
+throughput.
+
+Next step for serving (not done here): convert the final checkpoint to
+Hugging Face format with Megatron-Bridge's `AutoBridge` export, then load it
+in an inference server.
 
 ## Results
 
