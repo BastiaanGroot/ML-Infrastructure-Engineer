@@ -4,7 +4,7 @@
   "tags": ["cluster-validator", "nebius"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-24h", "to": "now" },
   "refresh": "30s",
   "templating": {
     "list": [
@@ -18,7 +18,7 @@
         "name": "loki_ds",
         "type": "datasource",
         "query": "loki",
-        "current": {}
+        "current": { "text": "Nebius Logging", "value": "PF8A5D721989A1ADC" }
       },
       {
         "name": "node",
@@ -73,11 +73,23 @@
       ]
     },
     {
-      "id": 4,
-      "title": "cluster-validator logs (incl. NCCL / storage bench output)",
+      "id": 5,
+      "title": "Check results",
       "type": "logs",
       "datasource": { "type": "loki", "uid": "${loki_ds}" },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "{__bucket__=\"default\", k8s_job_name=\"cluster-validator\", k8s_node_name=~\"$node\"} |~ \"\\\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench)\\\\] |RESULT:\""
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "cluster-validator logs",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "${loki_ds}" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 16 },
       "targets": [
         {
           "expr": "{__bucket__=\"default\", k8s_job_name=\"cluster-validator\", k8s_node_name=~\"$node\"}"

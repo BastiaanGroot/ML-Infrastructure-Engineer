@@ -31,6 +31,7 @@ if ! OUTPUT=$("$BIN" $ARGS 2>&1); then
     write_result "$NAME" "fail" "all_reduce_perf exited with an error" "$(jq -n --arg log "$OUTPUT" '{log: $log}')"
     exit 1
 fi
+echo "$OUTPUT"
 
 OOB="$(echo "$OUTPUT" | grep -oP 'Out of bounds values\s*:\s*\K[0-9]+' | tail -n1)"
 AVG_BUSBW="$(echo "$OUTPUT" | grep -oP 'Avg bus bandwidth\s*:\s*\K[0-9.]+' | tail -n1)"

@@ -58,6 +58,7 @@ for path in "${PATHS[@]}"; do
     READ_IOPS=$(echo "$FIO_OUT" | jq '.jobs[0].read.iops // 0')
     WRITE_IOPS=$(echo "$FIO_OUT" | jq '.jobs[0].write.iops // 0')
     TOTAL_BW_MBPS=$(echo "$READ_BW_MBPS + $WRITE_BW_MBPS" | bc -l)
+    log "[$NAME] $path: read $(printf '%.1f' "$READ_BW_MBPS") MB/s, write $(printf '%.1f' "$WRITE_BW_MBPS") MB/s"
 
     if [[ -n "${FIO_MIN_THROUGHPUT_MBPS:-}" ]] && (( $(echo "$TOTAL_BW_MBPS < $FIO_MIN_THROUGHPUT_MBPS" | bc -l) )); then
         FAIL_REASONS+=("$path: throughput ${TOTAL_BW_MBPS} MB/s below threshold ${FIO_MIN_THROUGHPUT_MBPS} MB/s")
