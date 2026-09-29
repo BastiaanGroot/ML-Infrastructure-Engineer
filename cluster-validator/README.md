@@ -41,8 +41,8 @@ docker run --rm --gpus all \
 
 ## Run on the cluster
 
-- **Single-node checks** (GPU health + NCCL within one node + LLM smoketest + storage): `k8s/job-validate.yaml`
-- **Multi-node InfiniBand check** (2x 8-GPU nodes, matching the 16-GPU PoC capacity): `k8s/job-nccl-multinode.yaml` (requires the [MPI Operator](https://github.com/kubeflow/mpi-operator)). Written for the current 2x 8x H100 node group, not yet run (the MPI Operator isn't installed yet) — see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband) section.
+- **Single-node checks** (GPU health + NCCL across the node's 8 GPUs + LLM smoketest + storage): `k8s/job-validate.yaml`
+- **Cross-node InfiniBand bandwidth**: `training/launch.py nccl-16gpu-ib` (all 16 GPUs) and `nccl-2gpu-ib` (one GPU per node), plain Indexed Jobs with no MPI Operator — see [`training/README.md`](../training/README.md#nccl-bandwidth) for the results.
 
 ```bash
 kubectl apply -f k8s/job-validate.yaml
