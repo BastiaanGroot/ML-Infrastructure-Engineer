@@ -2,8 +2,9 @@
 
 PoC for the [ML Infrastructure Engineer take-home assignment](docs/ML-Infrastructure-Engineer.md):
 validate a Nebius GPU cluster's capabilities, then run a training/inference
-workload on it (spec: 16x H200 GPUs, 2TB SSD network disk, 2TB SSD shared filesystem;
-the live cluster uses 16x H100 over InfiniBand instead, see [Hardware](#hardware-2x8-h100-with-infiniband)).
+workload on it on **16x H100 GPUs** (2 nodes x 8, InfiniBand), a 2TB SSD network disk and a
+2TB SSD shared filesystem. The assignment specifies H200s; H100s are what the tenant could
+get as 8-GPU nodes, see [Hardware](#hardware-2x8-h100-with-infiniband).
 
 **Nebius project:** [`ml-infra-poc`](https://console.nebius.com/project-e00rdtrppr0083wkrkw4td) (tenant `csa-hiring-sandbox2`)
 
@@ -17,7 +18,7 @@ the live cluster uses 16x H100 over InfiniBand instead, see [Hardware](#hardware
 
 ## Training (Option 1)
 
-[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) for the 2x8-GPU/InfiniBand cluster (now live), mapping model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) then implements and runs a small, honest subset of that outline on the earlier 2x1 H200 cluster — single-variable experiments on Qwen3 covering DP, TP, PP, CP, EP, FP8, attention backend, CPU offloading, a cross-node NCCL bandwidth sweep, and Nsight Systems profiles, logged to MLflow. See its [README](training/README.md#results) for the results.
+[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) and maps model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) runs the part of it that fits on the 16x H100 cluster: single-variable experiments on Qwen3-1.7B/8B/32B and Qwen3-30B-A3B covering DP, TP, PP, CP, EP, 3D parallelism, FP8, attention backend, CPU offloading and activation recomputation, plus NVLink and InfiniBand NCCL bandwidth sweeps and Nsight Systems profiles, all logged to MLflow. See its [README](training/README.md#results) for the results.
 
 [`dashboard/`](dashboard/) is a Streamlit app over those results (live from MLflow): strategy comparison, NCCL/Nsight communication view, and an analytical TP x PP x DP planner validated against the measured runs. Hosted on a Terraform-managed VM (public, no auth for now) — see its [README](dashboard/README.md).
 
@@ -43,7 +44,7 @@ Decisions to make (and record, once made) while executing the [take-home exercis
 
 *(This is the single canonical note on this — other docs just link here.)*
 
-**Now:** the GPU node group runs **2 nodes x 8 H100** (`gpu-h100-sxm`,
+The GPU node group runs **2 nodes x 8 H100** (`gpu-h100-sxm`,
 `8gpu-128vcpu-1600gb`, 16 GPUs total), attached to a
 `nebius_compute_v1_gpu_cluster` on **`fabric-4`** so the nodes share an
 InfiniBand fabric (see [`infra/main.tf`](infra/main.tf)). fabric-4 was picked
@@ -51,24 +52,21 @@ because `nebius capacity resource-advice list` showed full on-demand
 availability for this preset there (4/4 VMs, "high"), the most spare
 capacity of the H100 fabrics in `eu-north1`. Tenant quota is 32 H100s.
 
-**Before:** until 2026-09-28 the cluster ran **2 nodes x 1 H200**
-(`gpu-h200-sxm`, `1gpu-16vcpu-200gb`), with no InfiniBand, because 8-GPU H200
-nodes weren't available. Every result recorded so far in
-[`training/README.md`](training/README.md#results) and
-[`cluster-validator/README.md`](cluster-validator/README.md#results-last-validated-run)
-comes from that cluster, where cross-node traffic went over plain Ethernet
-(~2.35 GB/s measured).
+Each node has 8 `mlx5` InfiniBand HCAs, one per GPU on the same PCIe switch.
+The nodes don't advertise RDMA devices to Kubernetes, so training pods run
+**privileged with the host's `/dev/infiniband` mounted**
+([`training/k8s/worker.yaml.tmpl`](training/k8s/worker.yaml.tmpl)). NCCL then
+uses `NET/IB` with GPUDirect RDMA on all 8 NICs, with no socket fallback.
+Measured `all_reduce` bus bandwidth at 1 GiB: **468 GB/s** over NVLink within
+a node, **442 GB/s** across all 16 GPUs, and **46 GB/s** for one GPU per node
+over a single 400 Gb/s NIC (see
+[`training/README.md`](training/README.md#nccl-bandwidth)). The
+alternative, `gpu_settings.dra=true` on the node group (Nebius's managed
+DRA network driver), wasn't needed.
 
-**Still to do on the new cluster:**
+Privileged containers see every GPU on the node, whatever they requested, so
+each training pod claims the whole node and uses only its first `NPROC` GPUs.
 
-1. Confirm pods can actually use InfiniBand. The nodes don't advertise
-   InfiniBand/RDMA devices to Kubernetes, so pods probably need
-   `/dev/infiniband` access (privileged, or a device plugin) for NCCL to use
-   it rather than falling back to sockets.
-2. Install the [MPI Operator](https://github.com/kubeflow/mpi-operator) and
-   run `cluster-validator/k8s/job-nccl-multinode.yaml` (written, never run)
-   for a real InfiniBand bandwidth number. Nebius Solutions Library's
-   [`modules/nccl-test`](https://github.com/nebius/nebius-solutions-library/tree/main/modules/nccl-test)
-   shows how to install it from Terraform.
-3. Re-run the training experiments at 8 GPUs per node (update the
-   `training/k8s/` manifests' `nproc_per_node` and GPU requests).
+An earlier version of this PoC ran on **2 nodes x 1 H200** with plain
+Ethernet between them (2.35 GB/s measured), because 8-GPU H200 nodes weren't
+available. Those runs are kept in MLflow tagged `run_kind=legacy`.

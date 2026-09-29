@@ -29,7 +29,7 @@ providers, etc.).
    GPU platform/preset/fabric, node count). Defaults are 2x 8x H100
    (`gpu-h100-sxm`, `8gpu-128vcpu-1600gb`) in a GPU cluster on `fabric-4` —
    see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband)
-   section for why, and what's still to verify.
+   section for why, and how pods get InfiniBand access.
 4. Optional GPU node SSH access / shared filesystem mount / extra security
    group — not secrets (an SSH key here is a *public* key), but
    environment-specific, so unset by default. Copy
