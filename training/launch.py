@@ -26,6 +26,13 @@ Q8B_LONG = "--model qwen3-8b --approx-num-params 8.2e9 --micro-batch-size 1 --gl
 # Active (not total) params: 6ND FLOPs only count the experts a token visits.
 Q30B_A3B = "--model qwen3-30b-a3b --approx-num-params 3.3e9 --micro-batch-size 1 --global-batch-size 64"
 Q32B = "--model qwen3-32b --approx-num-params 32.8e9 --micro-batch-size 1 --global-batch-size 64"
+# Real FineWeb-Edu data (k8s/prepare-data.yaml): 1000 x 256 x 4096 = ~1B tokens.
+E2E = (
+    "--model qwen3-1p7b --approx-num-params 1.7e9 --micro-batch-size 2 --global-batch-size 256"
+    " --train-iters 1000 --lr-warmup-iters 50 --run-kind e2e"
+    " --data-path /mnt/shared-fs/data/fineweb-edu/fineweb-edu_text_document"
+    " --checkpoint-dir /mnt/shared-fs/checkpoints/e2e-q1p7b --save-interval 250"
+)
 
 # name -> (options, script, args). Options: nodes (default 2), nproc (GPUs per
 # node, default 8), profile (wrap node rank 0 in nsys).
@@ -65,6 +72,9 @@ EXPERIMENTS = {
     # Nsight Systems kernel breakdowns.
     "prof-q8b-baseline": ({"profile": True}, "run_experiment.py", Q8B_BASE),
     "prof-q8b-tp8-2nodes": ({"profile": True, "nproc": 4}, "run_experiment.py", f"{Q8B} --tensor-parallelism 8"),
+    # End-to-end: real data, loss curve, checkpoints on the shared filesystem.
+    # Re-launching after a failure resumes from the latest checkpoint.
+    "e2e-q1p7b": ({}, "run_experiment.py", E2E),
 }
 
 

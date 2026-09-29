@@ -60,6 +60,11 @@ spec:
         - name: infiniband
           hostPath:
             path: /dev/infiniband
+        # Tokenized datasets, checkpoints and the HF cache (see prepare-data.yaml).
+        - name: shared-fs
+          hostPath:
+            path: /mnt/filesystem-s6
+            type: Directory
       containers:
         - name: worker
           image: nvcr.io/nvidia/nemo:25.09
@@ -79,10 +84,13 @@ spec:
               value: ${NCCL_DEBUG}
             - name: NCCL_SOCKET_IFNAME
               value: eth0
+            - name: HF_HOME
+              value: /mnt/shared-fs/hf-cache
           volumeMounts:
             - {name: scripts, mountPath: /scripts}
             - {name: dshm, mountPath: /dev/shm}
             - {name: infiniband, mountPath: /dev/infiniband}
+            - {name: shared-fs, mountPath: /mnt/shared-fs}
           command: ["/bin/bash", "-c"]
           args:
             - |

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Thin launch script: run one Qwen3 Megatron-Bridge pretrain recipe under
-torchrun and log throughput/memory/MFU to MLflow.
+torchrun and log throughput/memory/MFU to MLflow. With --data-path it trains
+on a real tokenized dataset instead of mock data, logs the loss live, and
+(with --checkpoint-dir) saves and resumes checkpoints.
 
 Why this exists: the Megatron-Bridge version shipped in nvcr.io/nvidia/nemo
 (0.1.0rc4) predates both its generic `run_recipe.py` CLI launcher and its
@@ -35,6 +37,10 @@ from megatron.bridge.training.pretrain import pretrain
 from megatron.bridge.training.utils import train_utils
 
 STEP_LINE = re.compile(r"Step Time : ([\d.]+)s GPU utilization: ([\d.]+)TFLOP/s/GPU")
+ITER_LINE = re.compile(
+    r"iteration\s+(\d+)/\s*\d+ \|.*?elapsed time per iteration \(ms\): ([\d.]+) \|"
+    r".*?throughput per GPU \(TFLOP/s/GPU\): ([\d.]+) \|.*?lm loss: ([\d.E+-]+) \|"
+)
 
 
 def capture_step_logs() -> list[tuple[float, float]]:
@@ -56,6 +62,46 @@ def capture_step_logs() -> list[tuple[float, float]]:
 
     train_utils.print_rank_0 = print_and_capture
     return steps
+
+
+def log_iterations_live(mlflow) -> list[tuple[int, float, float, float]]:
+    """Log loss, step time and TFLOP/s to the active MLflow run as each
+    iteration finishes, and return (iteration, step_time_sec, tflops, loss).
+
+    Megatron prints the per-iteration line (the one with the loss) on the
+    last rank only, via train_utils.print_rank_last, so this runs there.
+    Logging live keeps the loss curve of a run that gets killed midway.
+    """
+    iters: list[tuple[int, float, float, float]] = []
+    original = train_utils.print_rank_last
+
+    def print_and_log(message, *args, **kwargs):
+        match = ITER_LINE.search(str(message))
+        if match:
+            iteration, step_ms, tflops, loss = int(match[1]), float(match[2]), float(match[3]), float(match[4])
+            iters.append((iteration, step_ms / 1000, tflops, loss))
+            mlflow.log_metrics(
+                {"lm_loss": loss, "iter_step_time_sec": step_ms / 1000, "iter_tflops_per_gpu": tflops},
+                step=iteration,
+            )
+        return original(message, *args, **kwargs)
+
+    train_utils.print_rank_last = print_and_log
+    return iters
+
+
+def start_or_resume_run(mlflow, experiment: str, run_name: str, run_kind: str):
+    """Resume the MLflow run with this name and run_kind if there is one, so
+    a job restarted from a checkpoint keeps one continuous loss curve."""
+    exp = mlflow.set_experiment(experiment)
+    existing = mlflow.MlflowClient().search_runs(
+        [exp.experiment_id],
+        f"tags.mlflow.runName = '{run_name}' and tags.run_kind = '{run_kind}'",
+        max_results=1,
+    )
+    if existing:
+        return mlflow.start_run(run_id=existing[0].info.run_id)
+    return mlflow.start_run(run_name=run_name)
 
 # H100 SXM dense tensor-core peaks per NVIDIA's datasheet - used only as the
 # denominator for the approximate MFU estimate below. FP8 dense peak is ~2x
@@ -87,6 +133,18 @@ def parse_args() -> argparse.Namespace:
         help="Only valid for MoE recipes (e.g. qwen3-30b-a3b); ignored otherwise.",
     )
     parser.add_argument("--train-iters", type=int, default=20)
+    parser.add_argument("--lr-warmup-iters", type=int, default=0)
+    parser.add_argument(
+        "--data-path",
+        help="Megatron indexed dataset prefix (without .bin/.idx). Without it, "
+        "the run uses synthetic (mock) data.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        help="Save checkpoints here and resume from the latest one on restart. "
+        "Without it, no checkpoints are written.",
+    )
+    parser.add_argument("--save-interval", type=int, default=250)
     parser.add_argument("--global-batch-size", type=int, default=4)
     parser.add_argument("--micro-batch-size", type=int, default=2)
     parser.add_argument("--seq-length", type=int, default=4096)
@@ -123,12 +181,66 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mlflow-run-name", required=True)
     parser.add_argument(
         "--run-kind",
-        choices=["experiment", "profile"],
+        choices=["experiment", "profile", "e2e"],
         default="experiment",
         help="MLflow run_kind tag. The dashboard hides 'profile' runs (e.g. "
-        "under nsys, which adds overhead) from the strategy comparison.",
+        "under nsys, which adds overhead) and 'e2e' runs (real data, "
+        "checkpointing) from the strategy comparison by default.",
     )
     return parser.parse_args()
+
+
+def run_params(args: argparse.Namespace, world_size: int) -> dict:
+    return {
+        "model": args.model,
+        "tensor_parallelism": args.tensor_parallelism,
+        "pipeline_parallelism": args.pipeline_parallelism,
+        "context_parallelism": args.context_parallelism,
+        "expert_parallelism": args.expert_parallelism if MODEL_RECIPES[args.model][2] else 1,
+        "data_parallelism": world_size
+        // (args.tensor_parallelism * args.pipeline_parallelism * args.context_parallelism),
+        "world_size": world_size,
+        "train_iters": args.train_iters,
+        "global_batch_size": args.global_batch_size,
+        "micro_batch_size": args.micro_batch_size,
+        "seq_length": args.seq_length,
+        "precision": args.precision,
+        "attention_backend": args.attention_backend or "default",
+        "cpu_offload": args.cpu_offload,
+        "recompute": args.recompute,
+        "approx_num_params": args.approx_num_params,
+        "nnodes": world_size // int(os.environ["LOCAL_WORLD_SIZE"]),
+        "gpus_per_node": int(os.environ["LOCAL_WORLD_SIZE"]),
+    }
+
+
+def log_live_summary(mlflow, args: argparse.Namespace, iters: list, world_size: int) -> None:
+    """Steady-state averages for this job's segment of a real-data run (the
+    first iteration after a start or resume includes warmup), then close the
+    MLflow run. Re-logging identical params on resume is allowed."""
+    mlflow.log_params({
+        **run_params(args, world_size),
+        "data_path": args.data_path,
+        "checkpoint_dir": args.checkpoint_dir or "none",
+        "save_interval": args.save_interval,
+        "lr_warmup_iters": args.lr_warmup_iters,
+    })
+    steady = iters[1:]
+    if steady:
+        step_time = sum(s for _, s, _, _ in steady) / len(steady)
+        tokens_per_sec_per_gpu = args.global_batch_size * args.seq_length / step_time / world_size
+        peak_flops_per_gpu = H100_FP8_PEAK_FLOPS_PER_GPU if "fp8" in args.precision else H100_BF16_PEAK_FLOPS_PER_GPU
+        metrics = {
+            "steady_step_time_sec": step_time,
+            "steady_tflops_per_gpu": sum(t for _, _, t, _ in steady) / len(steady),
+            "tokens_per_sec_per_gpu": tokens_per_sec_per_gpu,
+            "approx_mfu_pct": 100 * 6 * args.approx_num_params * tokens_per_sec_per_gpu / peak_flops_per_gpu,
+            "peak_gpu_memory_gb": torch.cuda.max_memory_allocated() / 1e9,
+            "final_lm_loss": iters[-1][3],
+        }
+        print(f"=== Results: {metrics} ===")
+        mlflow.log_metrics(metrics)
+    mlflow.end_run()
 
 
 def main() -> None:
@@ -137,7 +249,8 @@ def main() -> None:
     recipes = __import__(module_name, fromlist=["pretrain_config"])
 
     recipe_kwargs = dict(
-        mock=True,
+        mock=args.data_path is None,
+        data_paths=[args.data_path] if args.data_path else None,
         tensor_parallelism=args.tensor_parallelism,
         pipeline_parallelism=args.pipeline_parallelism,
         context_parallelism=args.context_parallelism,
@@ -146,11 +259,10 @@ def main() -> None:
         micro_batch_size=args.micro_batch_size,
         seq_length=args.seq_length,
         precision_config=args.precision,
-        # This is a short mechanism/throughput demo (mock data, no real
-        # convergence goal) - skip the recipe's default 500-iter LR warmup,
-        # which would otherwise violate `lr_warmup_steps < lr_decay_steps`
-        # once train_iters is this small.
-        lr_warmup_iters=0,
+        # The recipe's default 500-iter LR warmup must stay below
+        # train_iters (`lr_warmup_steps < lr_decay_steps`), so the short
+        # throughput runs use 0.
+        lr_warmup_iters=args.lr_warmup_iters,
     )
     if is_moe:
         recipe_kwargs["expert_parallelism"] = args.expert_parallelism
@@ -180,12 +292,29 @@ def main() -> None:
         cfg.model.recompute_method = "uniform"
         cfg.model.recompute_num_layers = 1
 
-    # Throughput-only runs: no checkpoint (an 8B one is ~115 GB on the node's
-    # container disk, a 32B one wouldn't fit) and no validation/test passes.
-    cfg.checkpoint.save = None
+    # Throughput runs write no checkpoint. With --checkpoint-dir, save and
+    # load point at the same directory, so a restarted job resumes from the
+    # latest checkpoint. No validation/test passes either way.
+    if args.checkpoint_dir:
+        cfg.checkpoint.save = args.checkpoint_dir
+        cfg.checkpoint.load = args.checkpoint_dir
+        cfg.checkpoint.save_interval = args.save_interval
+    else:
+        cfg.checkpoint.save = None
     cfg.train.eval_iters = 0
     cfg.logger.log_throughput = True
     cfg.logger.log_interval = 1
+
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    # Real-data runs log live from the last rank, which prints the loss.
+    live = args.data_path is not None
+    if live and rank == world_size - 1:
+        import mlflow  # Installed at container startup - see ../k8s/*.yaml.
+
+        start_or_resume_run(mlflow, args.mlflow_experiment, args.mlflow_run_name, args.run_kind)
+        mlflow.set_tags({"run_kind": args.run_kind, **CLUSTER_TAGS})
+        iters = log_iterations_live(mlflow)
 
     steps = capture_step_logs()
     torch.cuda.reset_peak_memory_stats()
@@ -193,8 +322,10 @@ def main() -> None:
     pretrain(cfg, forward_step)
     elapsed_sec = time.monotonic() - start
 
-    rank = int(os.environ.get("RANK", "0"))
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if live:
+        if rank == world_size - 1:
+            log_live_summary(mlflow, args, iters, world_size)
+        return
     if rank != 0:
         return  # Only rank 0 writes results - avoid duplicate MLflow runs.
 
@@ -226,27 +357,6 @@ def main() -> None:
     if steady:
         metrics["steady_step_time_sec"] = sum(s for s, _ in steady) / len(steady)
         metrics["steady_tflops_per_gpu"] = sum(t for _, t in steady) / len(steady)
-    params = {
-        "model": args.model,
-        "tensor_parallelism": args.tensor_parallelism,
-        "pipeline_parallelism": args.pipeline_parallelism,
-        "context_parallelism": args.context_parallelism,
-        "expert_parallelism": args.expert_parallelism if is_moe else 1,
-        "data_parallelism": world_size
-        // (args.tensor_parallelism * args.pipeline_parallelism * args.context_parallelism),
-        "world_size": world_size,
-        "train_iters": args.train_iters,
-        "global_batch_size": args.global_batch_size,
-        "micro_batch_size": args.micro_batch_size,
-        "seq_length": args.seq_length,
-        "precision": args.precision,
-        "attention_backend": args.attention_backend or "default",
-        "cpu_offload": args.cpu_offload,
-        "recompute": args.recompute,
-        "approx_num_params": args.approx_num_params,
-        "nnodes": world_size // int(os.environ["LOCAL_WORLD_SIZE"]),
-        "gpus_per_node": int(os.environ["LOCAL_WORLD_SIZE"]),
-    }
 
     print(f"=== Results: {metrics} ===")
     import mlflow  # Installed at container startup - see ../k8s/*.yaml.
@@ -254,7 +364,7 @@ def main() -> None:
     mlflow.set_experiment(args.mlflow_experiment)
     with mlflow.start_run(run_name=args.mlflow_run_name):
         mlflow.set_tags({"run_kind": args.run_kind, **CLUSTER_TAGS})
-        mlflow.log_params(params)
+        mlflow.log_params(run_params(args, world_size))
         mlflow.log_metrics(metrics)
         for iteration, (step_time, tflops) in enumerate(steps, start=1):
             mlflow.log_metric("iter_step_time_sec", step_time, step=iteration)

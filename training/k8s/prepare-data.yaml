@@ -1,0 +1,89 @@
+# One-shot data prep for the end-to-end run (see ../README.md "End-to-end
+# run"): downloads two FineWeb-Edu sample-10BT shards (~1.4B tokens) to the
+# network disk, then tokenizes them with the Qwen3 tokenizer into Megatron's
+# indexed format on the shared filesystem, where every training pod reads it.
+#
+#   kubectl apply -f training/k8s/prepare-data.yaml
+#   kubectl logs -f job/prepare-data
+#
+# CPU only (no GPU request), so it can run next to a training job.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training-scratch
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # The PoC's 2TB network disk, used as per-job scratch (raw downloads).
+      storage: 2Ti
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prepare-data
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      volumes:
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: training-scratch
+        - name: shared-fs
+          hostPath:
+            path: /mnt/filesystem-s6
+            type: Directory
+      containers:
+        - name: prepare-data
+          image: nvcr.io/nvidia/nemo:25.09
+          resources:
+            requests: {cpu: "64", memory: 128Gi}
+          env:
+            - name: SHARDS
+              value: "000_00000.parquet 001_00000.parquet"
+            # Shared HF cache: the training pods load the same tokenizer from here.
+            - name: HF_HOME
+              value: /mnt/shared-fs/hf-cache
+          volumeMounts:
+            - {name: scratch, mountPath: /mnt/scratch}
+            - {name: shared-fs, mountPath: /mnt/shared-fs}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              OUT=/mnt/shared-fs/data/fineweb-edu
+              mkdir -p "$OUT"
+              echo "=== download + convert to jsonl ==="
+              python3 - <<'EOF'
+              import json, os
+              import pyarrow.parquet as pq
+              from huggingface_hub import hf_hub_download
+              from transformers import AutoTokenizer
+
+              AutoTokenizer.from_pretrained("Qwen/Qwen3-1.7B")
+              docs = 0
+              with open("/mnt/scratch/fineweb-edu.jsonl", "w") as out:
+                  for shard in os.environ["SHARDS"].split():
+                      path = hf_hub_download("HuggingFaceFW/fineweb-edu", f"sample/10BT/{shard}",
+                                             repo_type="dataset", local_dir="/mnt/scratch/raw")
+                      for batch in pq.ParquetFile(path).iter_batches(columns=["text"], batch_size=10000):
+                          for text in batch.column(0).to_pylist():
+                              out.write(json.dumps({"text": text}) + "\n")
+                              docs += 1
+              print(f"{docs} documents")
+              EOF
+              echo "=== tokenize ==="
+              cd /opt/megatron-lm
+              PYTHONPATH=/opt/megatron-lm python3 tools/preprocess_data.py \
+                --input /mnt/scratch/fineweb-edu.jsonl \
+                --output-prefix "$OUT/fineweb-edu" \
+                --tokenizer-type HuggingFaceTokenizer --tokenizer-model Qwen/Qwen3-1.7B \
+                --json-keys text --append-eod --workers 64
+              ls -la "$OUT"

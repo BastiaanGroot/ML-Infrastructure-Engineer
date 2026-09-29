@@ -98,7 +98,8 @@ def bar(df: pd.DataFrame, value: str, title: str) -> alt.Chart:
 def comparison_tab(runs: pd.DataFrame) -> None:
     kinds = st.multiselect(
         "Run kinds", sorted(runs["run_kind"].unique()), default=["experiment"],
-        help="'profile' runs ran under nsys (5-37% overhead).",
+        help="'profile' runs ran under nsys (5-37% overhead); 'e2e' is the "
+        "real-data run with checkpointing (larger global batch).",
     )
     df = runs[runs["run_kind"].isin(kinds) & runs["metrics.steady_tflops_per_gpu"].notna()].copy()
     if df.empty:
