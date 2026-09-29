@@ -164,32 +164,31 @@ to Object Storage (see above).
 
 ## Results (last validated run)
 
-Ran via `k8s/job-validate.yaml` on the earlier PoC cluster (2x `gpu-h200-sxm`
-nodes, 1 GPU each, 2 TiB shared filesystem, 2 TiB network-disk PVC — since
-replaced by 2x 8x H100 with InfiniBand, not yet re-validated) on
-2026-09-17 (rerun after switching the LLM smoketest to a real Qwen3-0.6B
-checkpoint — same model family as [`training/`](../training/README.md),
-replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
+Ran via `k8s/job-validate.yaml` on one node of the live cluster (8x H100
+SXM, 2 TiB shared filesystem, 2 TiB network-disk PVC) on 2026-09-28. All
+checks passed. `summary.json`, as uploaded to
+`s3://ml-infra-poc-logs/cluster-validator/cluster-validator-xvwzw/20260928T193810Z/summary.json`
+(storage numbers rounded):
 
 ```json
 [
   {
     "name": "gpu_health",
     "status": "pass",
-    "message": "1 GPU(s) healthy, max temp 29C",
-    "metrics": { "gpu_count": 1, "max_temp_c": 29, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
-  },
-  {
-    "name": "nccl_bench",
-    "status": "fail",
-    "message": "avg bus bandwidth 0 GB/s below threshold 100 GB/s",
-    "metrics": { "gpu_count": 1, "avg_busbw_gbps": 0, "out_of_bounds": 0 }
+    "message": "8 GPU(s) healthy, max temp 31C",
+    "metrics": { "gpu_count": 8, "max_temp_c": 31, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
   },
   {
     "name": "llm_smoketest",
     "status": "pass",
-    "message": "generated 20 tokens and completed a backward pass on NVIDIA H200",
-    "metrics": { "device_name": "NVIDIA H200", "load_seconds": 0.275, "generation_seconds": 0.335, "tokens_generated": 20, "backward_pass_ok": true }
+    "message": "generated 20 tokens and completed a backward pass on NVIDIA H100 80GB HBM3",
+    "metrics": { "device_name": "NVIDIA H100 80GB HBM3", "load_seconds": 0.292, "generation_seconds": 0.843, "tokens_generated": 20, "backward_pass_ok": true }
+  },
+  {
+    "name": "nccl_bench",
+    "status": "pass",
+    "message": "avg bus bandwidth 465.764 GB/s across 8 GPU(s)",
+    "metrics": { "gpu_count": 8, "avg_busbw_gbps": 465.764, "out_of_bounds": 0 }
   },
   {
     "name": "storage_bench",
@@ -197,8 +196,8 @@ replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
     "message": "storage benchmark completed for: /mnt/network-disk, /mnt/shared-fs",
     "metrics": {
       "paths": [
-        { "path": "/mnt/network-disk", "read_bw_mbps": 219.5, "write_bw_mbps": 223.6, "read_iops": 219.5, "write_iops": 223.6 },
-        { "path": "/mnt/shared-fs", "read_bw_mbps": 2092.0, "write_bw_mbps": 2082.3, "read_iops": 2092.0, "write_iops": 2082.3 }
+        { "path": "/mnt/network-disk", "read_bw_mbps": 221.8, "write_bw_mbps": 225.9, "read_iops": 221.8, "write_iops": 225.9 },
+        { "path": "/mnt/shared-fs", "read_bw_mbps": 1730.9, "write_bw_mbps": 1732.8, "read_iops": 1730.9, "write_iops": 1732.8 }
       ]
     }
   }
@@ -207,26 +206,22 @@ replacing the earlier unrelated `tiny-random-gpt2`). Full `summary.json`:
 
 **Reading these:**
 
-- **GPU health** — pass. `nvidia-smi` reports a healthy H200 (143 GiB HBM3e), 29°C idle, zero ECC errors.
-- **NCCL bench — expected fail, not a bug.** `all_reduce_perf -g 1` has nothing
-  to actually reduce across on a single-GPU node, so bus bandwidth reads `0`
-  and trips the (NVLink/IB-oriented) 100 GB/s threshold. This check only
-  becomes meaningful once nodes have ≥2 GPUs, which the current 8-GPU
-  nodes do — see the root README's [hardware note](../README.md#hardware-2x8-h100-with-infiniband).
-- **LLM smoketest — pass, now on the actual model family we train.** A real
-  `generate()` (inference) plus one forward+backward pass (training) both
-  ran successfully on GPU in well under a second, loading a real Qwen3-0.6B
-  checkpoint rather than an architecture-unrelated random-weight test model
-  - confirming the PyTorch/CUDA/Transformers stack works end to end for the
-  actual model family used in [`training/`](../training/README.md), not
-  just raw `nvidia-smi` numbers.
-- **Storage bench — pass, and the two paths land very differently, as expected:**
-  the network-disk PVC (`compute-csi-default-sc`, backed by a Nebius Network
-  SSD block volume over the network) does ~220 MB/s read+write; the
-  shared-fs mount (Nebius Shared Filesystem, `virtiofs`) does ~2 GB/s — a
-  10x difference that reflects the different storage backends, not a
-  misconfiguration. Neither a `FIO_MIN_THROUGHPUT_MBPS` threshold was set for
-  this run, so both simply report their numbers.
+- **GPU health**: all 8 H100s visible and healthy, 31°C idle, zero ECC errors.
+- **NCCL bench**: `all_reduce_perf` across the node's 8 GPUs (512 MiB-8 GiB)
+  averages **466 GB/s** bus bandwidth over NVLink, well above the 100 GB/s
+  threshold. It matches the 468 GB/s the training NCCL sweep measured at
+  1 GiB (see [`training/README.md`](../training/README.md#nccl-bandwidth),
+  which also covers cross-node InfiniBand). On the earlier 1-GPU nodes this
+  check could only fail, since there was nothing to reduce across.
+- **LLM smoketest**: a real Qwen3-0.6B checkpoint (same model family as
+  [`training/`](../training/README.md)) generates 20 tokens and completes a
+  forward and backward pass on GPU, so the PyTorch/CUDA/Transformers stack
+  works end to end, not just `nvidia-smi`.
+- **Storage bench**: the network-disk PVC (`compute-csi-default-sc`, a
+  Nebius Network SSD volume) does ~220 MB/s read and write. The shared
+  filesystem (`virtiofs`) does ~1.7 GB/s, about 8x faster; the gap comes
+  from the storage backends, not misconfiguration. No
+  `FIO_MIN_THROUGHPUT_MBPS` threshold was set, so both just report numbers.
 
 **Live view while a job runs:** the [Grafana dashboard](#grafana-dashboard)
 above overlays GPU temp/utilization/power from Nebius Services with
