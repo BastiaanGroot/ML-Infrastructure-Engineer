@@ -2,9 +2,9 @@
 
 PoC for the [ML Infrastructure Engineer take-home assignment](docs/ML-Infrastructure-Engineer.md):
 validate a Nebius GPU cluster's capabilities, then run a training/inference
-workload on it on **16x H100 GPUs** (2 nodes x 8, InfiniBand), a 2TB SSD network disk and a
-2TB SSD shared filesystem. The assignment specifies H200s; H100s are what the tenant could
-get as 8-GPU nodes, see [Hardware](#hardware-2x8-h100-with-infiniband).
+workload on it on **16x H100 GPUs** (2 nodes x 8, InfiniBand, see
+[Hardware](#hardware-2x8-h100-with-infiniband)), a 2TB SSD network disk and a 2TB SSD
+shared filesystem.
 
 **Nebius project:** [`ml-infra-poc`](https://console.nebius.com/project-e00rdtrppr0083wkrkw4td) (tenant `csa-hiring-sandbox2`)
 
@@ -31,7 +31,7 @@ This repo has the [Nebius MCP Server](https://github.com/nebius/mcp-server) conf
 Decisions to make (and record, once made) while executing the [take-home exercise](docs/ML-Infrastructure-Engineer.md), informed by the [Nebius services overview](docs/nebius-services-overview.md).
 
 - [x] Option 1 (training) vs. Option 2 (inference) — starting with **training** (Option 1), inference (Option 2) to follow later.
-- [x] Scheduler: Soperator (Slurm) vs. Kubernetes — going with **plain Kubernetes-native scheduling**. Wanted to explore Soperator, but it requires a GPU capacity *reservation* (not just quota) that isn't currently available — asked Nebius for clarification, may revisit.
+- [x] Scheduler — **plain Kubernetes** (Nebius mk8s): multi-node jobs are Indexed Jobs running `torchrun`, with no Slurm or training operator on top.
 - [x] Storage split across the 2TB network disk vs. 2TB shared filesystem — both provisioned and benchmarked (see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run)): network disk (PVC, `compute-csi-default-sc`) as per-job/per-pod scratch, shared filesystem (`virtiofs`, mounted on every GPU node, ~8x faster in `fio`) for shared checkpoints/data across nodes.
 - [ ] Use the **vLLM** turnkey Application, or a custom-built inference server, for Option 2 — needs further exploration before deciding.
 - [x] Benchmark methodology — not running the actual **MLPerf** suite itself (its fixed reference models/datasets and submission/compliance process are a mismatch for a "lightweight, portable" validator and this exercise's scope), but using its metric *definitions* as the reference vocabulary for Option 1/2 results — e.g. throughput per accelerator and time-to-train for Option 1's distribution-strategy comparisons, p50/p99 latency + throughput for Option 2's two configs — so efficiency numbers are explainable in industry-standard terms on demo day.
@@ -66,7 +66,3 @@ DRA network driver), wasn't needed.
 
 Privileged containers see every GPU on the node, whatever they requested, so
 each training pod claims the whole node and uses only its first `NPROC` GPUs.
-
-An earlier version of this PoC ran on **2 nodes x 1 H200** with plain
-Ethernet between them (2.35 GB/s measured), because 8-GPU H200 nodes weren't
-available. Those runs are kept in MLflow tagged `run_kind=legacy`.

@@ -211,8 +211,7 @@ checks passed. `summary.json`, as uploaded to
   averages **466 GB/s** bus bandwidth over NVLink, well above the 100 GB/s
   threshold. It matches the 468 GB/s the training NCCL sweep measured at
   1 GiB (see [`training/README.md`](../training/README.md#nccl-bandwidth),
-  which also covers cross-node InfiniBand). On the earlier 1-GPU nodes this
-  check could only fail, since there was nothing to reduce across.
+  which also covers cross-node InfiniBand).
 - **LLM smoketest**: a real Qwen3-0.6B checkpoint (same model family as
   [`training/`](../training/README.md)) generates 20 tokens and completes a
   forward and backward pass on GPU, so the PyTorch/CUDA/Transformers stack

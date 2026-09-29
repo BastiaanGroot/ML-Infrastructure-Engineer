@@ -6,8 +6,7 @@ Streamlit app over the Option 1 training experiments, reading MLflow live:
   memory per run (DP/TP/PP/CP/EP, FP8, attention backend, CPU offload,
   recompute), plus per-iteration curves. Runs are filtered by the `run_kind`
   MLflow tag. Nsight-profiled runs (`profile`) are hidden by default since
-  `nsys` overhead skews them, and so are `legacy` runs from the earlier
-  2 x 1 H200 Ethernet cluster.
+  `nsys` overhead skews them.
 - **Communication** — the NVLink and InfiniBand NCCL all-reduce sweeps and the
   Nsight kernel-time breakdown (NCCL vs GEMM vs attention) from
   [`training/profiles/`](../training/profiles/).

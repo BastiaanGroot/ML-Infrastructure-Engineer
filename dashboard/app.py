@@ -98,8 +98,7 @@ def bar(df: pd.DataFrame, value: str, title: str) -> alt.Chart:
 def comparison_tab(runs: pd.DataFrame) -> None:
     kinds = st.multiselect(
         "Run kinds", sorted(runs["run_kind"].unique()), default=["experiment"],
-        help="'profile' runs ran under nsys (~8-10% overhead); 'legacy' are the "
-        "earlier Qwen3-1.7B runs on 2 nodes x 1 H200 over 2.35 GB/s Ethernet.",
+        help="'profile' runs ran under nsys (5-37% overhead).",
     )
     df = runs[runs["run_kind"].isin(kinds) & runs["metrics.steady_tflops_per_gpu"].notna()].copy()
     if df.empty:
@@ -165,7 +164,7 @@ def communication_tab(runs: pd.DataFrame) -> None:
             f"At 1 GiB: ~{NVLINK_GBPS} GB/s over NVLink inside a node (8 GPUs), "
             "~442 GB/s across both nodes (16 GPUs, NVLink + 8 InfiniBand NICs "
             f"per node), and ~{IB_PER_GPU_GBPS} GB/s for one GPU per node over a "
-            "single 400 Gb/s NIC. The earlier Ethernet PoC measured 2.35 GB/s."
+            "single 400 Gb/s NIC."
         )
 
     st.subheader("Where GPU time goes: Nsight Systems kernel breakdown")
@@ -212,14 +211,12 @@ def planner_tab() -> None:
         names = [m.name for m in rec.PRESET_MODELS]
         model = rec.PRESET_MODELS[names.index(st.selectbox("Preset", names, index=len(names) - 1))]
     with c2:
-        st.markdown("**Cluster**")
-        gpu = st.selectbox("GPU", ["H100 80GB", "H200 141GB"])
+        st.markdown("**Cluster** (H100 80GB)")
         nodes = st.number_input("Nodes", 1, 1024, 64)
         gpus_per_node = st.selectbox("GPUs per node", [1, 8], index=1)
-        link = st.selectbox(
-            "Inter-node link",
-            [f"InfiniBand, as measured here ({IB_PER_GPU_GBPS} GB/s per GPU)",
-             "Ethernet, as measured on the earlier PoC (2.35 GB/s)"],
+        st.caption(
+            f"Links as measured here: NVLink {NVLINK_GBPS} GB/s, "
+            f"InfiniBand {IB_PER_GPU_GBPS} GB/s per GPU."
         )
     with c3:
         st.markdown("**Workload**")
@@ -231,9 +228,8 @@ def planner_tab() -> None:
 
     cluster = rec.Cluster(
         nodes=nodes, gpus_per_node=gpus_per_node,
-        hbm_gb=80 if gpu.startswith("H100") else 141, peak_tflops=989,
-        intra_node_gbps=NVLINK_GBPS,
-        inter_node_gbps=IB_PER_GPU_GBPS if link.startswith("Infini") else 2.35,
+        hbm_gb=80, peak_tflops=H100_BF16_PEAK_TFLOPS,
+        intra_node_gbps=NVLINK_GBPS, inter_node_gbps=IB_PER_GPU_GBPS,
     )
     workload = rec.Workload(seq, micro, global_batch, mfu, recompute)
     plans = rec.rank_plans(model, cluster, workload)

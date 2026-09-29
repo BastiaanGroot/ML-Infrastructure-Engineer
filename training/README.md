@@ -79,13 +79,12 @@ experiment, tag `cluster=2x8-h100-ib`).
 
 With all 8 NICs per node in use, a 16-GPU all-reduce gets within 6% of
 single-node NVLink at large messages. The 2-GPU case reaches 93% of one
-400 Gb/s link's line rate. The earlier Ethernet PoC measured 2.35 GB/s for
-the same 2-GPU test, 20x less. Small messages are where crossing nodes
+400 Gb/s link's line rate. Small messages are where crossing nodes
 still costs: at 1 MiB the 16-GPU all-reduce is 3x slower than NVLink. That
 matters for tensor parallelism, which sends many medium-sized all-reduces
 on the critical path.
 
-### Qwen3-1.7B: DP vs TP vs PP (same model as the earlier 2-GPU runs)
+### Qwen3-1.7B: DP vs TP vs PP
 
 Micro-batch 2, global batch 32, seq 4096.
 
@@ -95,11 +94,9 @@ Micro-batch 2, global batch 32, seq 4096.
 | `q1p7b-tp2-dp8` | TP2 x DP8 | 0.338 s | 283.1 | 28.6% | 24.7 GB |
 | `q1p7b-pp2-dp8` | PP2 x DP8 | 0.427 s | 225.9 | 22.8% | 27.3 GB |
 
-The ranking is the opposite of the old 2 x 1 H200 Ethernet cluster. There,
-PP2 was fastest (95.8 TFLOP/s/GPU), then DP2 (42.0), then TP2 (27.9),
-because PP's point-to-point sends were the only traffic that link could
-carry cheaply. With NVLink and InfiniBand, a model this small is simply
-compute-bound under DP. TP and PP only add overhead: smaller GEMMs per GPU
+A model this small fits easily on one GPU, and with NVLink and InfiniBand
+DP16's gradient traffic overlaps with the backward pass, so plain DP is
+fastest. TP and PP only add overhead: smaller GEMMs per GPU
 for TP, and for PP a pipeline bubble of 1 in 2 microbatches (DP8 leaves
 only 2 microbatches per step). Their advantage is memory: 24.7-27.3 GB
 versus 44.3 GB.
@@ -161,8 +158,7 @@ What this shows:
   materializes the full attention score matrix.
 - **CPU offload is a last resort on this hardware**: it saves 18% of memory
   (40.5 GB) but makes the step 4x slower. Moving activations over PCIe can't
-  keep up with an H100 at this batch size. On the old H200 runs it looked
-  free only because those GPUs were waiting on the network anyway.
+  keep up with an H100 at this batch size.
 
 ### Qwen3-30B-A3B (MoE): expert parallelism within vs across nodes
 
@@ -174,9 +170,8 @@ global batch 64. TFLOP/s counts active parameters only.
 | `q30b-a3b-ep8` | EP8 (all-to-all inside a node) | 3.73 s | **101.2** | 10.2% | 62.1 GB |
 | `q30b-a3b-ep16` | EP16 (all-to-all across nodes) | 9.42 s | 40.1 | 4.1% | 51.3 GB |
 
-On the old 2-GPU cluster this model couldn't even start: EP2 ran out of
-memory building the optimizer (16B parameters per GPU). Here EP8 fits with
-16 experts per GPU. Spreading experts across both nodes (EP16) saves 11 GB
+EP8 fits with 16 experts per GPU (smaller EP degrees leave too many experts,
+and their optimizer states, on each GPU). Spreading experts across both nodes (EP16) saves 11 GB
 per GPU but makes the step 2.5x slower. The token all-to-all then crosses
 InfiniBand twice per MoE layer, forward and backward, and unlike DP's
 gradient reduction it can't overlap with compute. Keep EP inside the NVLink
@@ -225,8 +220,7 @@ baseline, NCCL is split between TP all-reduces (13%, median 0.17 ms per
 all-gather (12%, overlapped with the backward pass). In the cross-node TP8
 run, TP all-reduces alone are 63% of kernel time: 747k calls with a median
 of 0.64 ms, about 4x the NVLink TP2 call. This is the kernel-level reason
-TP beyond what's needed to fit is expensive. On the old Ethernet cluster
-the same profiles showed NCCL at 84-95% of kernel time.
+TP beyond what's needed to fit is expensive.
 
 The `.nsys-rep` files stay in each pod's ephemeral filesystem. To open a
 timeline in the Nsight Systems GUI, write the report to a mounted volume or

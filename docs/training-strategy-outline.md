@@ -81,15 +81,8 @@ spanning our exact target range:
 
 Bolded rows are the two that matter most for this project: **Qwen3-32B's
 recipe is exactly our 16 GPUs**, and **Qwen3-235B-A22B is the real >100B
-target** the assignment references.
-
-## A note on H100 vs H200
-
-The table is Megatron-Bridge's H100 recipe set, and it matches both the PoC
-cluster and the customer's 512x H100 target. The assignment's H200 spec
-would give the same 989 TFLOP/s bf16 compute per GPU with 141 GB instead of
-80 GB of HBM, so on H100 some layouts need more TP/PP/CP just to fit (see
-the OOMs in [`training/README.md`](../training/README.md#results)).
+target** the assignment references. The table is Megatron-Bridge's H100
+recipe set, the same GPU as both the PoC and the customer's 512x H100 target.
 
 ## Sizing insight: what actually fits on the PoC's 16 GPUs
 
@@ -120,10 +113,9 @@ This is the useful takeaway for the client, now backed by measured runs:
 results. In short:
 
 - **NCCL all-reduce sweeps** over NVLink (8 GPUs), NVLink + InfiniBand
-  (16 GPUs), and one NIC (2 GPUs, directly comparable to the earlier
-  Ethernet cluster: 46 GB/s versus 2.35 GB/s).
-- **Qwen3-1.7B** DP16 vs TP2 x DP8 vs PP2 x DP8, the same model as the
-  earlier 2-GPU runs. With InfiniBand the ranking flips to DP first.
+  (16 GPUs), and a single NIC (2 GPUs, one per node: 46 GB/s).
+- **Qwen3-1.7B** DP16 vs TP2 x DP8 vs PP2 x DP8: plain DP is fastest for a
+  model this small.
 - **Qwen3-8B** single-variable suite around a TP2 x DP8 baseline: DP16
   (OOM, then with recompute), TP4, TP8 within one node vs split across
   nodes, PP2, CP2 vs TP4 at seq 16384 (where the baseline OOMs), FP8,

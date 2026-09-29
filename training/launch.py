@@ -31,12 +31,11 @@ Q32B = "--model qwen3-32b --approx-num-params 32.8e9 --micro-batch-size 1 --glob
 # node, default 8), profile (wrap node rank 0 in nsys).
 EXPERIMENTS = {
     # NCCL all_reduce bandwidth: NVLink within a node, 16 GPUs over
-    # InfiniBand, and 1 GPU per node (directly comparable to the old
-    # Ethernet cluster's 2-GPU sweep).
+    # InfiniBand, and one GPU per node (a single NIC).
     "nccl-8gpu-nvlink": ({"nodes": 1}, "nccl_bandwidth_sweep.py", ""),
     "nccl-16gpu-ib": ({}, "nccl_bandwidth_sweep.py", ""),
     "nccl-2gpu-ib": ({"nproc": 1}, "nccl_bandwidth_sweep.py", ""),
-    # Qwen3-1.7B: same model as the earlier 2-GPU runs, now at 16 GPUs.
+    # Qwen3-1.7B: DP vs TP vs PP at 16 GPUs.
     "q1p7b-dp16": ({}, "run_experiment.py", Q1P7B),
     "q1p7b-tp2-dp8": ({}, "run_experiment.py", f"{Q1P7B} --tensor-parallelism 2"),
     "q1p7b-pp2-dp8": ({}, "run_experiment.py", f"{Q1P7B} --pipeline-parallelism 2"),
