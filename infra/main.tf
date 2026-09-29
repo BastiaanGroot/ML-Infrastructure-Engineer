@@ -166,6 +166,27 @@ resource "random_password" "mlflow_admin" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+# Service account MLflow uses for its Object Storage artifact bucket. It
+# needs editor rights at tenant level, granted via the tenant's built-in
+# "editors" group.
+resource "nebius_iam_v1_service_account" "mlflow" {
+  count     = var.enable_mlflow ? 1 : 0
+  parent_id = var.project_id
+  name      = "mlflow-sa"
+}
+
+data "nebius_iam_v1_group" "tenant_editors" {
+  count     = var.enable_mlflow ? 1 : 0
+  name      = "editors"
+  parent_id = var.tenant_id
+}
+
+resource "nebius_iam_v1_group_membership" "mlflow_editors" {
+  count     = var.enable_mlflow ? 1 : 0
+  parent_id = data.nebius_iam_v1_group.tenant_editors[0].id
+  member_id = nebius_iam_v1_service_account.mlflow[0].id
+}
+
 resource "nebius_msp_mlflow_v1alpha1_cluster" "main" {
   count       = var.enable_mlflow ? 1 : 0
   parent_id   = var.project_id
@@ -173,7 +194,7 @@ resource "nebius_msp_mlflow_v1alpha1_cluster" "main" {
   description = "MLflow tracking server for Option 1 (training) distribution-strategy experiments."
 
   network_id         = nebius_vpc_v1_network.main.id
-  service_account_id = var.mlflow_service_account_id
+  service_account_id = nebius_iam_v1_service_account.mlflow[0].id
   admin_username     = var.mlflow_admin_username
   admin_password     = random_password.mlflow_admin[0].result
   size               = var.mlflow_size

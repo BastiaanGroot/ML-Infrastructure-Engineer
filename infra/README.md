@@ -43,9 +43,16 @@ against a project that already has resources.
 
 A Nebius-managed MLflow cluster (`nebius_msp_mlflow_v1alpha1_cluster`) is
 **created and running** (`enable_mlflow = true`), for use as the experiment
-tracking backend for Option 1's distribution-strategy runs. Uses the
-pre-existing `mlflow-sa` service account for its Object Storage bucket
-access.
+tracking backend for Option 1's distribution-strategy runs. MLflow reaches
+its Object Storage bucket through the `mlflow-sa` service account, which
+Terraform creates alongside the cluster and adds to the tenant's `editors`
+group (`tenant_id` variable). In this project the SA and its membership were
+created by hand first, then brought under Terraform with:
+
+```bash
+terraform import -var=enable_mlflow=true 'nebius_iam_v1_service_account.mlflow[0]' <serviceaccount-id>
+terraform import -var=enable_mlflow=true 'nebius_iam_v1_group_membership.mlflow_editors[0]' <groupmembership-id>
+```
 
 - Tracking endpoint (public — `public_access = true`; still gated by
   HTTP basic auth below, no anonymous access):

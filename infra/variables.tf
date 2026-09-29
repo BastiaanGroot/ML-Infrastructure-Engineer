@@ -3,6 +3,12 @@ variable "project_id" {
   type        = string
 }
 
+variable "tenant_id" {
+  description = "Nebius tenant ID that owns the project (its \"editors\" group is looked up for mlflow-sa)."
+  type        = string
+  default     = "tenant-e00txje2rqact2jtfd"
+}
+
 variable "region" {
   description = "Nebius region."
   type        = string
@@ -93,18 +99,12 @@ variable "node_group_security_group_ids" {
 # efficiency across distribution-strategy experiments. Off by default since
 # it's a real, ongoing-cost managed service (compute + managed Postgres +
 # storage) — flip enable_mlflow to true (and `terraform apply`) when Option 1
-# work actually starts. mlflow_service_account_id defaults to the "mlflow-sa"
-# service account already created in the project for this purpose.
+# work actually starts. This also creates MLflow's service account
+# ("mlflow-sa") and adds it to the tenant's "editors" group.
 variable "enable_mlflow" {
   description = "Whether to create the Nebius-managed MLflow cluster. Off by default (real ongoing cost) — see infra/README.md."
   type        = bool
   default     = false
-}
-
-variable "mlflow_service_account_id" {
-  description = "Service account MLflow uses to access its Object Storage bucket. Defaults to the pre-existing \"mlflow-sa\" service account in this project."
-  type        = string
-  default     = "serviceaccount-e00fdpk94g3qnyh4ca"
 }
 
 variable "mlflow_admin_username" {
