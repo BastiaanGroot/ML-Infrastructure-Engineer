@@ -20,13 +20,13 @@ trade-off.
 ## Build & push
 
 ```bash
-docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v2 .
+docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3 .
 nebius registry configure-helper
-docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v2
+docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3
 ```
 
 Bump the tag on every change and update it in
-[`k8s/job-validate.yaml`](k8s/job-validate.yaml) to match (currently `v2`).
+[`k8s/job-validate.yaml`](k8s/job-validate.yaml) to match (currently `v3`).
 
 Image lives in the `cluster-validator` registry (`registry-e00qprtt5j85j3syw7`) in the
 `ml-infra-poc` project. The registry path in the image tag is the registry ID
@@ -176,9 +176,9 @@ to Object Storage (see above).
 ## Results (last validated run)
 
 Ran via `k8s/job-validate.yaml` on one node of the live cluster (8x H100
-SXM, 2 TiB shared filesystem, 2 TiB network-disk PVC) on 2026-09-28. All
-checks passed. `summary.json`, as uploaded to
-`s3://ml-infra-poc-logs/cluster-validator/cluster-validator-xvwzw/20260928T193810Z/summary.json`
+SXM, 2 TiB shared filesystem, 2 TiB network-disk PVC) on 2026-09-29 with
+image `v3`. All checks passed. `summary.json`, as uploaded to
+`s3://ml-infra-poc-logs/cluster-validator/cluster-validator-9fmlp/20260929T143327Z/summary.json`
 (storage numbers rounded):
 
 ```json
@@ -186,20 +186,20 @@ checks passed. `summary.json`, as uploaded to
   {
     "name": "gpu_health",
     "status": "pass",
-    "message": "8 GPU(s) healthy, max temp 31C",
-    "metrics": { "gpu_count": 8, "max_temp_c": 31, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
+    "message": "8 GPU(s) healthy, max temp 25C",
+    "metrics": { "gpu_count": 8, "max_temp_c": 25, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
   },
   {
     "name": "llm_smoketest",
     "status": "pass",
     "message": "generated 20 tokens and completed a backward pass on NVIDIA H100 80GB HBM3",
-    "metrics": { "device_name": "NVIDIA H100 80GB HBM3", "load_seconds": 0.292, "generation_seconds": 0.843, "tokens_generated": 20, "backward_pass_ok": true }
+    "metrics": { "device_name": "NVIDIA H100 80GB HBM3", "load_seconds": 1.349, "generation_seconds": 2.782, "tokens_generated": 20, "backward_pass_ok": true }
   },
   {
     "name": "nccl_bench",
     "status": "pass",
-    "message": "avg bus bandwidth 465.764 GB/s across 8 GPU(s)",
-    "metrics": { "gpu_count": 8, "avg_busbw_gbps": 465.764, "out_of_bounds": 0 }
+    "message": "avg bus bandwidth 467.92 GB/s across 8 GPU(s)",
+    "metrics": { "gpu_count": 8, "avg_busbw_gbps": 467.92, "out_of_bounds": 0 }
   },
   {
     "name": "storage_bench",
@@ -207,8 +207,8 @@ checks passed. `summary.json`, as uploaded to
     "message": "storage benchmark completed for: /mnt/network-disk, /mnt/shared-fs",
     "metrics": {
       "paths": [
-        { "path": "/mnt/network-disk", "read_bw_mbps": 221.8, "write_bw_mbps": 225.9, "read_iops": 221.8, "write_iops": 225.9 },
-        { "path": "/mnt/shared-fs", "read_bw_mbps": 1730.9, "write_bw_mbps": 1732.8, "read_iops": 1730.9, "write_iops": 1732.8 }
+        { "path": "/mnt/network-disk", "read_bw_mbps": 217.8, "write_bw_mbps": 222.6, "read_iops": 217.8, "write_iops": 222.6 },
+        { "path": "/mnt/shared-fs", "read_bw_mbps": 1616.4, "write_bw_mbps": 1618.8, "read_iops": 1616.4, "write_iops": 1618.8 }
       ]
     }
   }
@@ -217,9 +217,9 @@ checks passed. `summary.json`, as uploaded to
 
 **Reading these:**
 
-- **GPU health**: all 8 H100s visible and healthy, 31°C idle, zero ECC errors.
+- **GPU health**: all 8 H100s visible and healthy, 25°C idle, zero ECC errors.
 - **NCCL bench**: `all_reduce_perf` across the node's 8 GPUs (512 MiB-8 GiB)
-  averages **466 GB/s** bus bandwidth over NVLink, well above the 100 GB/s
+  averages **468 GB/s** bus bandwidth over NVLink, well above the 100 GB/s
   threshold. It matches the 468 GB/s the training NCCL sweep measured at
   1 GiB (see [`training/README.md`](../training/README.md#nccl-bandwidth),
   which also covers cross-node InfiniBand).
@@ -229,7 +229,7 @@ checks passed. `summary.json`, as uploaded to
   works end to end, not just `nvidia-smi`.
 - **Storage bench**: the network-disk PVC (`compute-csi-default-sc`, a
   Nebius Network SSD volume) does ~220 MB/s read and write. The shared
-  filesystem (`virtiofs`) does ~1.7 GB/s, about 8x faster; the gap comes
+  filesystem (`virtiofs`) does ~1.6 GB/s, about 7x faster; the gap comes
   from the storage backends, not misconfiguration. No
   `FIO_MIN_THROUGHPUT_MBPS` threshold was set, so both just report numbers.
 

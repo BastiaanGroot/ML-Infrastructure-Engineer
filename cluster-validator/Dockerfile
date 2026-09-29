@@ -12,20 +12,22 @@
 # Source image: https://docs.nebius.com/kubernetes/gpu/nccl-test
 FROM cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.26.5-ubu22.04-cu12.8
 
+# python3-dev: Triton compiles a small C launcher against Python.h at runtime.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        fio jq bc python3 python3-pip \
+        fio jq bc python3 python3-pip python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# torch: cu128 wheel matches the base image's CUDA 12.8 (LLM smoketest).
-# transformers: LLM smoketest. boto3: optional Object Storage log upload.
+# torch + transformers: LLM smoketest, pinned to a combination verified on
+# the H100 nodes (the PyPI torch wheel bundles its own CUDA 13 runtime).
+# boto3: optional Object Storage log upload.
 # Checkpoint: Qwen3-0.6B, the smallest real model in the same Qwen3 family
 # used for the actual training experiments (see ../training/README.md) -
 # baked in at build time so the smoketest needs no network access at
 # validation time, and it's small enough (~0.6B params) that this stays a
 # quick smoke test, not a real inference benchmark.
-RUN pip3 install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu128 \
-        torch transformers boto3 \
+RUN pip3 install --no-cache-dir \
+        torch==2.14.0 transformers==5.17.0 boto3 \
     && python3 -c "from transformers import AutoModelForCausalLM, AutoTokenizer; \
 m = 'Qwen/Qwen3-0.6B'; \
 AutoModelForCausalLM.from_pretrained(m).save_pretrained('/opt/validate/qwen3-0.6b'); \

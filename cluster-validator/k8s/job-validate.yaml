@@ -25,7 +25,7 @@ spec:
         - name: nebius-registry
       containers:
         - name: cluster-validator
-          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v2
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3
           envFrom:
             - secretRef:
                 # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the logs
