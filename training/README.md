@@ -1,563 +1,233 @@
-# Training (Option 1): Qwen3 distributed-strategy experiments
+# Training (Option 1): Qwen3 distributed-strategy experiments on 16x H100
 
-Small-scale, real implementation of the design in
-[`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md) —
-single-variable experiments that fit exactly on the earlier **2 nodes x
-1 H200** cluster (no InfiniBand; the cluster has since moved to 2x 8x H100
-with InfiniBand, see the root README's
-["Hardware"](../README.md#hardware-2x8-h100-with-infiniband) section, and
-these experiments haven't been re-run there yet), comparing Data/Tensor/Pipeline/Context/Expert Parallelism
-head-to-head, with results logged to the live MLflow tracking server. All
-ran on the real cluster and produced a documented result — see
-[Results](#results) (Expert Parallelism's result is a confirmed OOM, not a
-success, but that's still a real, evidenced answer).
+The runnable part of
+[`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md):
+single-variable experiments on **2 nodes x 8 H100 over InfiniBand**
+comparing data, tensor, pipeline, context and expert parallelism, 3D
+parallelism, FP8, attention backends, CPU offloading and activation
+recomputation. Everything is logged to the managed MLflow server and
+browsable in the [dashboard](../dashboard/README.md).
 
-## Container image: no custom Dockerfile
+## How it runs
 
-`nvcr.io/nvidia/nemo:25.09` (NVIDIA's public NeMo Framework container, no NGC
-login required to pull) already ships **Megatron-Bridge** pre-installed, so
-building a custom image on top of it for a ~100-line script would only add
-an unnecessary extra registry push of an ~19GB layer stack. Instead, our
-thin launch script ([`scripts/run_experiment.py`](scripts/run_experiment.py))
-is delivered via a `ConfigMap` ([`k8s/scripts-configmap.yaml`](k8s/scripts-configmap.yaml))
-mounted into the stock image at `/scripts`.
-
-That script exists because the *specific* Megatron-Bridge version shipped in
-this container tag (`0.1.0rc4`, pinned when the image was built) predates
-two things newer Megatron-Bridge releases added upstream: a generic
-`scripts/training/run_recipe.py` CLI launcher, and native MLflow logging on
-`LoggerConfig`. Neither is available in-container (confirmed by exec'ing
-into the image — see commit history) so the script calls each model's
-`pretrain_config()` recipe function and `pretrain()` entry point directly
-(the same public API the newer launcher itself wraps), and logs
-throughput/memory/MFU to MLflow itself via the plain `mlflow` client.
-
-## Experiments
-
-All five runs use Megatron-Bridge's own Qwen3 recipe module unmodified (not
-hand-tuned configs) — see
-[`docs/training-strategy-outline.md`](../docs/training-strategy-outline.md#recipe-table)
-for where these sit in the full size/strategy table. All five use synthetic
-(`mock=True`) data, a deliberate simplification (see the outline doc) — this
-measures parallelism/infra mechanics (throughput, memory, step time), not a
-trained checkpoint.
-
-| # | Manifest | Model | Recipe module | Strategy | Seq len | GPUs |
-|---|---|---|---|---|---|---|
-| 1 | [`k8s/experiment-01-data-parallel.yaml`](k8s/experiment-01-data-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (TP=1/PP=1 x2 replicas) | 4096 | 2 |
-| 2 | [`k8s/experiment-02-tensor-parallel.yaml`](k8s/experiment-02-tensor-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=2/PP=1 | 4096 | 2 |
-| 3 | [`k8s/experiment-03-pipeline-parallel.yaml`](k8s/experiment-03-pipeline-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | TP=1/PP=2 | 4096 | 2 |
-| 4 | [`k8s/experiment-04-context-parallel.yaml`](k8s/experiment-04-context-parallel.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | CP=2 | 16384 | 2 |
-| 4b | [`k8s/experiment-04b-longseq-baseline.yaml`](k8s/experiment-04b-longseq-baseline.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2 (CP=1 baseline for #4) | 16384 | 2 |
-| 5 | [`k8s/experiment-05-expert-parallel.yaml`](k8s/experiment-05-expert-parallel.yaml) | Qwen3-30B-A3B (MoE) | `megatron.bridge.recipes.qwen.qwen3_30b_a3b` | EP=2 (stretch, **OOMs** - see Results) | 4096 | 2 |
-| 6 | [`k8s/experiment-06-fp8.yaml`](k8s/experiment-06-fp8.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, FP8 precision (baseline for #1 is BF16) | 4096 | 2 |
-| 7 | [`k8s/experiment-07-attention-backend.yaml`](k8s/experiment-07-attention-backend.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, unfused attention (baseline for #1 is fused/auto) | 4096 | 2 |
-| 8 | [`k8s/experiment-08-cpu-offload.yaml`](k8s/experiment-08-cpu-offload.yaml) | Qwen3-1.7B | `megatron.bridge.recipes.qwen.qwen3_1p7b` | DP=2, activation CPU offload (baseline for #1 has it off) | 4096 | 2 |
-| 9 | [`k8s/experiment-09-nccl-bandwidth.yaml`](k8s/experiment-09-nccl-bandwidth.yaml) | n/a (no model) | n/a — pure `torch.distributed` | Cross-node NCCL `all_reduce` bandwidth sweep, 1 MiB-1 GiB | n/a | 2 |
-
-All rows use the exact same model and recipe module - only the parallelism
-degree (and, for 4/4b, sequence length) under test differs, so each is a
-genuine single-variable comparison against its matched baseline. (An
-earlier pass ran experiment 2 against Qwen3-4B instead; that made the two
-runs harder to compare apples-to-apples, so it was superseded by this
-matched-model rerun - see [Results](#results).) Experiment 3 uses
-`global_batch_size=4, micro_batch_size=1` (4 microbatches) instead of
-experiment 1/2's `4, 2` - PP=2 needs `num_microbatches >= pipeline_parallelism`
-or Megatron-Core's scheduler asserts, and 1 microbatch (what `4, 2` would
-give under PP=2's DP=1) doesn't clear that bar. Experiments 4/4b compare CP
-against a **matched long-sequence DP baseline** (not experiment 1's
-4096-seq baseline) so only `context_parallelism` differs - comparing CP
-straight to experiment 1 would confound "CP vs DP" with "long vs short
-sequence". Both 4/4b also need a larger `dshm` `emptyDir` (8Gi vs 2Gi
-elsewhere) - the 4x longer sequence means 4x bigger batches through
-PyTorch's DataLoader workers, which otherwise die with a shared-memory
-"Bus error". Experiments 6-8 are each a single flag away from experiment 1's
-exact baseline (`--precision`, `--attention-backend`, `--cpu-offload`
-respectively) - the cleanest possible single-variable comparisons in this
-set. Experiment 9 is the odd one out - it doesn't train anything, just
-measures raw cross-node `all_reduce` bandwidth with
-[`scripts/nccl_bandwidth_sweep.py`](scripts/nccl_bandwidth_sweep.py)
-(mounted from its own `nccl-bandwidth-script` ConfigMap,
-`k8s/nccl-bandwidth-configmap.yaml`, not `qwen3-training-scripts`) - a real
-number behind the "no InfiniBand" explanation used throughout the TP/PP/CP
-takeaways above.
-
-All manifests define a headless `Service` + 2 plain `Pod`s (rank 0 /
-rank 1) running `torchrun` directly — deliberately **no new operator**
-(avoids
-repeating the still-unresolved MPI-Operator gap noted in
-[`cluster-validator/k8s/job-nccl-multinode.yaml`](../cluster-validator/k8s/job-nccl-multinode.yaml)).
-At 2 pods, hand-rolled `torchrun` rendezvous env vars (`MASTER_ADDR`/
-`MASTER_PORT`/`NODE_RANK`, resolved via each Pod's stable
-`<hostname>.<subdomain>.svc.cluster.local` DNS name) are simpler than
-installing the Kubeflow Training Operator for this scale. A `dshm` `emptyDir`
-volume (`medium: Memory`) is mounted at `/dev/shm` in each pod — the
-container's 64MB default isn't enough for PyTorch's DataLoader worker
-processes and fails with `OSError: [Errno 28] No space left on device`
-otherwise.
-
-Global/micro batch sizes are set per-experiment (no gradient accumulation
-where avoidable) rather than the recipes' out-of-the-box (larger) defaults -
-see the note above on why experiment 3's batch sizing differs from 1/2's.
-All five also override the recipe's default 500-iteration LR warmup down to
-0, since this is a 20-iteration mechanism demo, not a real convergence run.
+- **Image**: stock `nvcr.io/nvidia/nemo:25.09` (ships Megatron-Bridge
+  `0.1.0rc4`), no custom Dockerfile. That Megatron-Bridge version predates
+  the generic `run_recipe.py` launcher and native MLflow logging, so
+  [`scripts/run_experiment.py`](scripts/run_experiment.py) calls each Qwen3
+  recipe's `pretrain_config()` and `pretrain()` directly and logs to MLflow
+  itself. The scripts reach the pods via the `qwen3-training-scripts`
+  ConfigMap.
+- **One template for every experiment**: [`k8s/worker.yaml.tmpl`](k8s/worker.yaml.tmpl)
+  is an Indexed Job (one `torchrun` pod per node, `JOB_COMPLETION_INDEX` is
+  the node rank) plus a headless Service that gives pod 0 a stable DNS name
+  for rendezvous. No training operator is needed at this scale.
+- **InfiniBand**: pods run privileged with the host's `/dev/infiniband`
+  mounted, so NCCL uses `NET/IB` with GPUDirect RDMA on all 8 NICs per node
+  (see the root README's
+  [Hardware](../README.md#hardware-2x8-h100-with-infiniband) section).
+  Privileged containers see all 8 GPUs, so every pod claims the whole node
+  and uses only its first `NPROC` GPUs.
+- **[`launch.py`](launch.py)** holds the experiment matrix, regenerates the
+  ConfigMap, renders the template and applies it.
+- **Workload**: synthetic (`mock=True`) data, 20 iterations, no LR warmup, no
+  checkpoint or eval passes. These runs measure parallelism mechanics
+  (throughput, memory, communication), not convergence. Metrics are
+  steady-state averages over iterations 2-20, from Megatron's own
+  per-iteration log (`steady_step_time_sec`, `steady_tflops_per_gpu`).
+  MFU is against the H100's 989 TFLOP/s bf16 dense peak.
 
 ## Running
 
 ```bash
-# One-time: MLflow Basic-Auth credentials as a K8s Secret (password from
-# SecretStash - see infra/README.md "MLflow"):
+# One-time: MLflow credentials as a K8s Secret (password from SecretStash,
+# see infra/README.md "MLflow"):
 kubectl create secret generic mlflow-creds \
   --from-literal=MLFLOW_TRACKING_USERNAME=admin \
   --from-file=MLFLOW_TRACKING_PASSWORD=<(nebius mysterybox payload get-by-key \
       --secret-id mbsec-e00s29kcffh4yr0mh5 --key password --format json \
       | grep -v "token from" | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["string_value"],end="")')
 
-# One-time: the launch script, delivered via ConfigMap:
-kubectl apply -f k8s/scripts-configmap.yaml
-
-# Experiment 1 (DP=2):
-kubectl apply -f k8s/experiment-01-data-parallel.yaml
-kubectl logs -f qwen3-dp-worker-0   # rank 0 - where our script's MLflow run lands
-kubectl delete -f k8s/experiment-01-data-parallel.yaml
-
-# Experiment 2 (TP=2) - only after experiment 1's Pods are deleted, both need
-# the cluster's only 2 GPUs:
-kubectl apply -f k8s/experiment-02-tensor-parallel.yaml
-kubectl logs -f qwen3-tp-worker-0
-kubectl delete -f k8s/experiment-02-tensor-parallel.yaml
-
-# Experiment 3 (PP=2) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-03-pipeline-parallel.yaml
-kubectl logs -f qwen3-pp-worker-0
-kubectl delete -f k8s/experiment-03-pipeline-parallel.yaml
-
-# Experiment 4 (CP=2, seq=16384) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-04-context-parallel.yaml
-kubectl logs -f qwen3-cp-worker-0
-kubectl delete -f k8s/experiment-04-context-parallel.yaml
-
-# Experiment 4b (DP=2 long-seq baseline for #4) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-04b-longseq-baseline.yaml
-kubectl logs -f qwen3-dplong-worker-0
-kubectl delete -f k8s/experiment-04b-longseq-baseline.yaml
-
-# Experiment 5 (EP=2, stretch) - confirmed OOMs, see Results below; kept
-# runnable so the failure is reproducible, not just asserted:
-kubectl apply -f k8s/experiment-05-expert-parallel.yaml
-kubectl logs -f qwen3-ep-worker-0
-kubectl delete -f k8s/experiment-05-expert-parallel.yaml
-
-# Experiment 6 (FP8) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-06-fp8.yaml
-kubectl logs -f qwen3-fp8-worker-0
-kubectl delete -f k8s/experiment-06-fp8.yaml
-
-# Experiment 7 (unfused attention) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-07-attention-backend.yaml
-kubectl logs -f qwen3-unfused-worker-0
-kubectl delete -f k8s/experiment-07-attention-backend.yaml
-
-# Experiment 8 (CPU offload) - same 2-GPU constraint:
-kubectl apply -f k8s/experiment-08-cpu-offload.yaml
-kubectl logs -f qwen3-offload-worker-0
-kubectl delete -f k8s/experiment-08-cpu-offload.yaml
-
-# Experiment 9 (NCCL bandwidth sweep) - different ConfigMap, no model:
-kubectl apply -f k8s/nccl-bandwidth-configmap.yaml
-kubectl apply -f k8s/experiment-09-nccl-bandwidth.yaml
-kubectl logs -f nccl-bw-worker-0
-kubectl delete -f k8s/experiment-09-nccl-bandwidth.yaml
-
-# Nsight Systems profiles of the DP=2 / TP=2 runs - rank 0 prints its
-# kernel-time table at the end of its log:
-kubectl apply -f k8s/profile-dp.yaml     # or k8s/profile-tp.yaml
-kubectl logs qwen3-profdp-worker-0 | sed -n '/CUDA GPU Kernel Summary/,$p' \
-  > profiles/dp-cuda_gpu_kern_sum.txt
-kubectl delete -f k8s/profile-dp.yaml
-python3 scripts/summarize_kernels.py profiles/*.txt
+./launch.py --list                      # all experiment names
+./launch.py q8b-baseline
+kubectl logs -f job/q8b-baseline        # node rank 0; results line at the end
+kubectl delete job,svc q8b-baseline     # before the next one - each claims both nodes
 ```
 
-First run on each node pulls the ~19GB `nemo` image (one-time per node,
-cached by containerd afterward — all experiments reuse the exact same
-image, so only experiment 1 pays this cost). Each run also downloads its
-Qwen3 tokenizer from Hugging Face Hub on first use (small, public, no token
-needed).
+Profile runs (`prof-*`) wrap node rank 0 in `nsys profile` and print the
+`cuda_gpu_kern_sum` table at the end of its log. Copy it into
+[`profiles/`](profiles/), then summarize it with
+`python3 scripts/summarize_kernels.py profiles/*.txt`.
 
 ## Results
 
-All of the numbers below are also browsable in the
-[dashboard](../dashboard/README.md), which reads them live from MLflow
-(`steady_step_time_sec` / `steady_tflops_per_gpu` metrics, `run_kind` tag),
-alongside a TP x PP x DP planner checked against these runs.
+All numbers are steady-state, on 16 GPUs unless stated otherwise. Each
+MLflow run is named after its experiment (`qwen3-parallelism-experiments`
+experiment, tag `cluster=2x8-h100-ib`).
 
-Eight of the nine runs (experiments 1-4, 4b, and 6-9) ran successfully
-end-to-end on the live 2-node cluster and logged to MLflow. Experiments
-1-4, 4b, and 6-8 each ran 20 training iterations + train/valid/test eval;
-experiment 9 (bandwidth sweep) doesn't train, it just measures
-`all_reduce` time. Logged runs:
-[`dp-baseline-qwen3-1p7b`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/14a3393a0c63406a9487453d382eff50),
-[`tp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/0aa09cd060a940dfadee442e327ea18d),
-[`pp-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/02bd574d2db94f018047f503c7a2db80),
-[`cp-qwen3-1p7b-2gpu-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/167b0ae1dbb243e79e044406bfc70638),
-[`dp-longseq-baseline-qwen3-1p7b-seq16384`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/65123a0219e049a795e1c867d1c78a42),
-[`fp8-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/38a8c403b6e04462a5985d7f8c3a9312),
-[`unfused-attn-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/bc376002cdba4cb09c40bf61113f97b6),
-[`cpu-offload-qwen3-1p7b-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/3fd91e0b292a454da1198221ccd85571),
-and
-[`nccl-allreduce-bandwidth-2gpu`](https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud/#/experiments/1/runs/017032ab07314753bc71c0d9d59b6cef)
-under the `qwen3-parallelism-experiments` experiment (link requires the
-MLflow admin credentials above). Same model, same recipe module throughout -
-only the one flag under test differs from its matched baseline each time -
-a clean single-variable comparison in every case. Experiment 5 (EP=2) OOMs
-before reaching the MLflow logging call - see its own section below for
-the (still real, still documented) result.
+### NCCL bandwidth
 
-> An earlier pass ran experiment 2 against Qwen3-4B instead of Qwen3-1.7B,
-> which confounded "TP vs DP" with "bigger vs smaller model". That run
-> (`tp-qwen3-4b-2gpu`) is kept in MLflow for historical reference but is
-> **superseded** by the matched-model numbers below.
+`all_reduce` bus bandwidth from
+[`scripts/nccl_bandwidth_sweep.py`](scripts/nccl_bandwidth_sweep.py)
+(`nccl-*` experiments):
 
-Two sets of numbers, for two different questions:
-
-| Metric (MLflow-logged, wall-clock inclusive) | DP=2 | TP=2 | PP=2 |
+| Message size | 8 GPUs, NVLink | 16 GPUs, NVLink + IB | 2 GPUs (1 per node), one IB NIC |
 |---|---|---|---|
-| `wall_time_sec` (20 iters + full setup/teardown) | 174.6 | 207.9 | 171.9 |
-| `tokens_per_sec_per_gpu` | 938 | 394 | 953 |
-| `peak_gpu_memory_gb` | 53.3 | 33.8 | 28.2 |
-| `approx_mfu_pct` (6ND approximation, see caveat) | 0.97% | 0.41% | 0.98% |
+| 1 MiB | 69.5 GB/s | 22.6 GB/s | 16.9 GB/s |
+| 16 MiB | 246.1 GB/s | 158.1 GB/s | 38.6 GB/s |
+| 256 MiB | 424.4 GB/s | 381.4 GB/s | 45.3 GB/s |
+| 1 GiB | **468.0 GB/s** | **442.4 GB/s** | **46.3 GB/s** |
 
-The MLflow-logged numbers above measure the *entire* `pretrain()` call,
-including one-time model/optimizer construction and HF tokenizer download —
-at only 20 iterations that fixed setup cost dominates the average, and
-`tokens_per_sec_per_gpu` also isn't directly comparable here since each
-experiment uses a different `global_batch_size` (4/2/4 - see
-[`run_experiment.py`](scripts/run_experiment.py)'s batch-sizing comment and
-the Experiments table above). So **these aren't a fair steady-state
-comparison** between the three strategies. That's a real limitation of this
-quick demo, called out honestly rather than hidden.
+With all 8 NICs per node in use, a 16-GPU all-reduce gets within 6% of
+single-node NVLink at large messages. The 2-GPU case reaches 93% of one
+400 Gb/s link's line rate. The earlier Ethernet PoC measured 2.35 GB/s for
+the same 2-GPU test, 20x less. Small messages are where crossing nodes
+still costs: at 1 MiB the 16-GPU all-reduce is 3x slower than NVLink. That
+matters for tensor parallelism, which sends many medium-sized all-reduces
+on the critical path.
 
-For the actual strategy comparison, use Megatron's own per-iteration console
-log (`elapsed time per iteration`, `throughput per GPU (TFLOP/s/GPU)`),
-averaged over the steady-state iterations 2-20 (iteration 1 includes
-CUDA-graph/kernel warmup and isn't representative):
+### Qwen3-1.7B: DP vs TP vs PP (same model as the earlier 2-GPU runs)
 
-| Steady-state metric (iters 2-20 avg) | DP=2 | TP=2 | PP=2 |
-|---|---|---|---|
-| Step time | 2.29s | 1.73s | 1.00s |
-| Throughput per GPU | 42.0 TFLOP/s | 27.9 TFLOP/s | 95.8 TFLOP/s |
-| MFU (vs H200 989 TFLOP/s bf16 peak) | 4.25% | 2.82% | 9.69% |
+Micro-batch 2, global batch 32, seq 4096.
 
-Step time itself isn't directly comparable across rows (each uses a
-different global batch size), which is exactly why **throughput per GPU
-(TFLOP/s/GPU)** is the metric to read here - it normalizes for actual FLOPs
-done per the full model and per GPU, and isolates hardware efficiency
-regardless of batch size.
+| Experiment | Layout | Step | TFLOP/s/GPU | MFU | Peak mem |
+|---|---|---|---|---|---|
+| `q1p7b-dp16` | DP16 | 0.275 s | **348.9** | 35.3% | 44.3 GB |
+| `q1p7b-tp2-dp8` | TP2 x DP8 | 0.338 s | 283.1 | 28.6% | 24.7 GB |
+| `q1p7b-pp2-dp8` | PP2 x DP8 | 0.427 s | 225.9 | 22.8% | 27.3 GB |
 
-**Takeaway 1 (TP vs DP)**: with the model held constant, TP=2 across our two
-nodes (no InfiniBand - plain VPC Ethernet) is genuinely **~34% less
-FLOP-efficient per GPU** than DP=2 (27.9 vs 42.0 TFLOP/s/GPU). This is a
-bigger, and more expected, penalty than an earlier mismatched-model pass
-suggested (that run's Qwen3-4B TP showed only a ~4% gap vs DP). The likely
-explanation: Qwen3-1.7B's smaller per-layer matmuls mean TP=2's per-layer
-all-reduce (fixed message-size overhead, paid every forward+backward on
-every transformer layer) is a much larger fraction of each layer's compute
-time than it was for the bigger 4B model - so the earlier, larger model was
-inadvertently flattering TP's apparent efficiency by having more compute to
-hide the communication cost behind. This matches the outline doc's original
-working hypothesis ("markedly slower... no InfiniBand") much better, and is
-the reason single-variable comparisons matter.
+The ranking is the opposite of the old 2 x 1 H200 Ethernet cluster. There,
+PP2 was fastest (95.8 TFLOP/s/GPU), then DP2 (42.0), then TP2 (27.9),
+because PP's point-to-point sends were the only traffic that link could
+carry cheaply. With NVLink and InfiniBand, a model this small is simply
+compute-bound under DP. TP and PP only add overhead: smaller GEMMs per GPU
+for TP, and for PP a pipeline bubble of 1 in 2 microbatches (DP8 leaves
+only 2 microbatches per step). Their advantage is memory: 24.7-27.3 GB
+versus 44.3 GB.
 
-**Takeaway 2 (PP's surprisingly high per-GPU throughput)**: PP=2 hit **95.8
-TFLOP/s/GPU - more than 2x DP=2 and 3.4x TP=2** on the exact same hardware
-and model. This isn't PP being "better" in general; it's a direct
-consequence of **how much data crosses the slow (no-InfiniBand) link between
-our two nodes, and how it's used**:
-- **DP=2** all-reduces the *entire* model's gradients (all 1.7B parameters)
-  across nodes on every step - the largest message of the three, and it's
-  on the critical path before the optimizer step can proceed.
-- **TP=2** all-reduces *activations* on every transformer layer's
-  forward+backward (small messages, but many of them per step, each one a
-  synchronous round-trip that stalls both GPUs) - the worst combination of
-  message count and mandatory synchronization at this scale.
-- **PP=2** only ever sends the *activations at the layer boundary* between
-  the two stages (point-to-point, not all-reduce) - and with 4 microbatches
-  pipelined, GPU0 can start on microbatch 2 while GPU1 is still finishing
-  microbatch 1's backward, hiding most of that transfer behind useful
-  compute instead of stalling on it.
+### Qwen3-8B: one change at a time from a TP2 x DP8 baseline
 
-In short: for this specific *inter-node, no-IB* topology, communication
-**volume and synchronicity** matter far more than which strategy is
-"supposed to" scale better - PP's point-to-point, overlappable transfers are
-cheap here in a way DP's full-gradient all-reduce and TP's per-layer
-all-reduce aren't. On a real InfiniBand fabric (the target 2x8 cluster) this
-gap would shrink dramatically, since DP/TP's all-reduces would no longer be
-bottlenecked on cross-node bandwidth - this result is a property of *this*
-2-node Ethernet topology, not a universal ranking of the three strategies.
-All MFU figures (~3-10%) are still low in absolute terms versus real
-large-batch pretraining runs (commonly 30-50%+) - expected here, since
-`global_batch_size` was deliberately kept small for a clean per-step
-comparison, and 20 iterations is far too short for any of Megatron's
-overlap/warmup optimizations to fully kick in.
+Micro-batch 1, global batch 64, seq 4096 (16384 for the long-sequence rows).
 
-The peak GPU memory numbers tell the complementary story TP and PP are also
-*for*: TP=2's 33.8GB and PP=2's 28.2GB are both **lower** than DP=2's 53.3GB,
-because both shard the model (by layer-internals for TP, by whole layers for
-PP) across GPUs instead of replicating it (DP keeps a full copy on every
-rank). At this tiny scale that memory saving doesn't matter - all three
-comfortably fit an H200's 143GB - but it's exactly why TP/PP become
-*necessary* (not just a throughput trade-off) once a single model copy no
-longer fits on one GPU, consistent with the outline doc's framing that
-the 2-GPU cluster these ran on is far below where 3D parallelism becomes
-memory-necessary rather than throughput-optional.
+| Experiment | Change | Step | TFLOP/s/GPU | MFU | Peak mem |
+|---|---|---|---|---|---|
+| `q8b-baseline` | TP2 x DP8 | 1.94 s | **414.9** | 42.0% | 49.2 GB |
+| `q8b-dp16` | DP16 | - | - | - | **OOM** |
+| `q8b-dp16-recompute` | DP16 + full recompute | 2.17 s | 369.9* | 37.4%* | 65.5 GB |
+| `q8b-tp4-dp4` | TP4 x DP4 | 2.60 s | 308.7 | 31.2% | 30.2 GB |
+| `q8b-tp8-dp2` | TP8 x DP2 | 5.06 s | 158.8 | 16.1% | 20.7 GB |
+| `q8b-tp8-1node` | TP8, one node (8 GPUs) | 9.92 s | 162.0 | 16.4% | 26.8 GB |
+| `q8b-tp8-2nodes` | TP8 split 4 + 4 across nodes | 10.04 s | 160.2 | 16.2% | 26.8 GB |
+| `q8b-pp2` | TP2 x PP2 x DP4 | 2.29 s | 350.6 | 35.4% | 33.2 GB |
+| `q8b-fp8` | FP8 (current scaling) | 1.86 s | **436.2** | 44.1%** | 47.2 GB |
+| `q8b-unfused-attn` | unfused attention | 2.61 s | 308.0 | 31.1% | 69.4 GB |
+| `q8b-cpu-offload` | activation CPU offload | 7.87 s | 102.1 | 10.3% | 40.5 GB |
+| `q8b-seq16k-baseline` | TP2 x DP8, seq 16384 | - | - | - | **OOM** |
+| `q8b-seq16k-cp2` | TP2 x CP2 x DP4, seq 16384 | 4.46 s | **440.5** | 44.5% | 66.7 GB |
+| `q8b-seq16k-tp4` | TP4 x DP4, seq 16384 | 4.76 s | 412.7 | 41.7% | 63.8 GB |
 
-### Context Parallel (CP=2) vs a matched long-sequence DP=2 baseline
+\* Megatron counts the recomputed forward pass, so this overstates useful
+work. Compare step times instead: 2.17 s versus 1.94 s.
+\** Against the bf16 peak; against H100's ~1979 TFLOP/s FP8 peak it's 22%.
 
-Experiment 4 (CP=2) and 4b (DP=2, CP=1) both run Qwen3-1.7B at
-`seq_length=16384` (4x experiments 1-3's 4096) - only `context_parallelism`
-differs, so this isolates CP's effect cleanly:
+What this shows:
 
-| Steady-state metric (iters 2-20 avg, seq=16384) | DP=2 (CP=1, exp. 4b) | CP=2 (exp. 4) |
+- **TP costs throughput quickly, even on NVLink.** Going from TP2 to TP4 to
+  TP8 drops throughput from 415 to 309 to 159 TFLOP/s/GPU. Each GPU's GEMMs
+  shrink while the per-layer all-reduces don't. At 8B, TP2 is enough to fit
+  and the best layout. TP16 isn't possible at all: Qwen3-8B's 8 KV heads cap
+  TP at 8.
+- **Splitting a TP group across nodes cost almost nothing here**: TP8 at
+  4 + 4 GPUs over InfiniBand ran within 1% of TP8 on one node. The profile
+  below shows why. TP8 is already dominated by communication and small
+  kernels inside one node, and 4 NICs per node carry the cross-node half of
+  each all-reduce fast enough. That's a result of this fabric (one 400 Gb/s
+  NIC per GPU), not a general licence to span TP across nodes. At 1 MiB the
+  NCCL sweep above is still 3x slower across nodes.
+- **Pure DP runs out of memory, and recompute is the expensive fix.** DP16
+  with full replicas OOMs at 80 GB. Full recomputation makes it fit (65.5 GB)
+  but 12% slower than simply using TP2, which also halves memory.
+- **PP2 on top of TP2 costs 15%** (a 2-stage bubble with 4 microbatches per
+  DP rank). It saves memory (33.2 GB), which an 8B model doesn't need here.
+- **Long sequences need CP or more TP.** At seq 16384 the TP2 baseline OOMs.
+  CP2 (sequence split across two GPUs) fits at 66.7 GB and is 6% faster
+  than spending the same two-way split on TP4 (63.8 GB), most likely because
+  CP's ring-attention exchange overlaps with compute while TP's per-layer
+  all-reduces sit on the critical path.
+- **FP8 gives a 4% faster step** (1.94 s to 1.86 s), far from 2x. Only the
+  GEMMs run in FP8; attention, norms and communication don't, and current
+  scaling computes a scale factor for every tensor on every step.
+- **Fused attention matters for memory first**: unfused attention costs 26%
+  in step time and 41% more memory (69.4 GB versus 49.2 GB), because it
+  materializes the full attention score matrix.
+- **CPU offload is a last resort on this hardware**: it saves 18% of memory
+  (40.5 GB) but makes the step 4x slower. Moving activations over PCIe can't
+  keep up with an H100 at this batch size. On the old H200 runs it looked
+  free only because those GPUs were waiting on the network anyway.
+
+### Qwen3-30B-A3B (MoE): expert parallelism within vs across nodes
+
+128 experts, ~3B active parameters per token, TP1, DP16. Micro-batch 1,
+global batch 64. TFLOP/s counts active parameters only.
+
+| Experiment | Layout | Step | TFLOP/s/GPU | MFU | Peak mem |
+|---|---|---|---|---|---|
+| `q30b-a3b-ep8` | EP8 (all-to-all inside a node) | 3.73 s | **101.2** | 10.2% | 62.1 GB |
+| `q30b-a3b-ep16` | EP16 (all-to-all across nodes) | 9.42 s | 40.1 | 4.1% | 51.3 GB |
+
+On the old 2-GPU cluster this model couldn't even start: EP2 ran out of
+memory building the optimizer (16B parameters per GPU). Here EP8 fits with
+16 experts per GPU. Spreading experts across both nodes (EP16) saves 11 GB
+per GPU but makes the step 2.5x slower. The token all-to-all then crosses
+InfiniBand twice per MoE layer, forward and backward, and unlike DP's
+gradient reduction it can't overlap with compute. Keep EP inside the NVLink
+domain, and scale out with DP (or PP) across nodes. That's also how
+NVIDIA's 235B-A22B recipe is shaped (EP8 on 8-GPU nodes). Low MFU is
+expected for MoE at micro-batch 1: each expert's GEMM only sees the few
+tokens routed to it.
+
+### Qwen3-32B: 3D parallelism
+
+Micro-batch 1, global batch 64.
+
+| Experiment | Layout | Step | TFLOP/s/GPU | MFU | Peak mem |
+|---|---|---|---|---|---|
+| `q32b-tp4-pp2-dp2` | TP4 x PP2 x DP2 | 10.69 s | **313.9** | 31.7% | 52.8 GB |
+| `q32b-tp8-pp2-dp1` | TP8 x PP2 (NVIDIA's recipe default) | 14.79 s | 226.9 | 22.9% | 40.2 GB |
+
+A 32B model's weights, gradients and Adam states come to ~525 GB, so it has
+to be sharded across at least 8 H100s before counting any activations. The
+layout keeps each TP group
+inside a node (NVLink), puts the pipeline stage boundary between the
+nodes (point-to-point activations over InfiniBand), and uses DP for the
+rest. NVIDIA's recipe (TP8 x PP2) uses the least memory, but on 16 GPUs it
+leaves no DP. The step is 38% slower than TP4 x PP2 x DP2, which still fits
+comfortably at 52.8 GB. Same lesson as for 8B: use the smallest TP that
+fits.
+
+### Nsight profiles
+
+`prof-q8b-baseline` and `prof-q8b-tp8-2nodes` re-run two of the layouts
+above under `nsys` (tables in [`profiles/`](profiles/)). Profiling overhead
+was +5% for the baseline (2.03 s versus 1.94 s) and +37% for the
+communication-heavy TP8 run (13.7 s versus 10.0 s).
+
+| Share of summed GPU kernel time | TP2 x DP8 (TP over NVLink) | TP8, 4 + 4 GPUs (TP over IB) |
 |---|---|---|
-| Step time | 2.43s | 2.74s |
-| Throughput per GPU | 107.6 TFLOP/s | 47.7 TFLOP/s |
-| MFU (vs H200 989 TFLOP/s bf16 peak) | 10.88% | 4.83% |
-| **Peak GPU memory** | **85.1 GB** | **53.3 GB** |
+| GEMM | **47.0%** | 19.0% |
+| NCCL communication | 26.1% | **63.4%** |
+| Fused attention | 7.7% | 4.0% |
+| Everything else | 19.2% | 13.6% |
 
-**Takeaway 3 (CP trades throughput for memory, like TP does)**: CP=2 is
-**~56% less FLOP-efficient per GPU** than the long-sequence DP=2 baseline
-(47.7 vs 107.6 TFLOP/s/GPU) - each GPU now has to exchange KV chunks with
-its ring-attention partner across the same no-InfiniBand link that hurt
-TP=2 earlier, and for a similar reason (attention's per-chunk communication
-happens on the critical path of every layer's forward+backward). In
-exchange, CP=2 needs **~37% less peak GPU memory** (53.3GB vs 85.1GB) -
-each GPU only ever materializes activations for half the 16384-token
-sequence instead of the full thing. This is the same memory-vs-throughput
-trade-off TP showed earlier, just sharding the *sequence* axis instead of a
-layer's internals - and it's the trade-off that matters in practice: at
-sequences long enough that a single GPU's activations alone would OOM (the
-whole reason CP exists), DP's "just replicate the model" strategy isn't an
-option at all, regardless of its throughput advantage here. Both peak
-memory figures also confirm this setup was nowhere near that regime yet -
-even the 85.1GB DP baseline fits comfortably inside an H200's 143GB - so
-this result demonstrates the *mechanism* and its trade-off, not a case
-where CP was strictly necessary.
+These are shares of kernel time summed over CUDA streams, not wall time;
+NCCL runs on its own stream and partly overlaps with compute. In the
+baseline, NCCL is split between TP all-reduces (13%, median 0.17 ms per
+33.5 MB call over NVLink) and DP's gradient reduce-scatter and parameter
+all-gather (12%, overlapped with the backward pass). In the cross-node TP8
+run, TP all-reduces alone are 63% of kernel time: 747k calls with a median
+of 0.64 ms, about 4x the NVLink TP2 call. This is the kernel-level reason
+TP beyond what's needed to fit is expensive. On the old Ethernet cluster
+the same profiles showed NCCL at 84-95% of kernel time.
 
-### Expert Parallel (EP=2) - confirmed infeasible on 2 GPUs
-
-Experiment 5 runs Qwen3-30B-A3B (128 experts, ~30B total / ~3B
-active-per-token) with `expert_parallelism=2, tensor_parallelism=1,
-pipeline_parallelism=1`. Unlike TP/PP/CP, EP doesn't consume a separate
-dimension of `total_GPUs = TP x PP x CP x DP` - it shards *within* the DP
-dimension for MoE layers, so `world_size=2` here gives `data_parallel_size=2`
-(not 1), which is why `global_batch_size=2` (the minimum satisfying
-`global_batch_size % (micro_batch_size x data_parallel_size) == 0`).
-
-A back-of-envelope check before running it: with EP=2, each GPU ends up
-holding roughly half of the ~29B MoE-expert parameters (no further
-redundancy to shard away, since EP already equals the full DP group here)
-plus a full replica of the ~1.4B non-expert (attention/embedding)
-parameters - about **16B params/GPU**. Standard mixed-precision Adam needs
-roughly 16 bytes/param without further sharding opportunity for that
-expert shard (bf16 param + bf16 grad + fp32 master/momentum/variance) -
-**~256GB**, about 1.8x an H200's 143GB HBM, before even counting
-activations.
-
-Ran anyway to get a real answer instead of just the estimate. It confirmed
-almost exactly:
-
-```
-> number of parameters on (tensor, pipeline) model parallel rank (0, 0): 16036608000
-
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 12.00 MiB.
-GPU 0 has a total capacity of 139.80 GiB of which 9.12 MiB is free.
-Including non-PyTorch memory, this process has 139.78 GiB memory in use.
-```
-
-**16.04B params/GPU** - within 1% of the back-of-envelope estimate - and the
-OOM hit *while constructing the distributed optimizer's fp32 master
-parameter shards* (`distrib_optimizer.py`'s `shard_model_param.clone().float()`),
-before a single training step ran. Two smaller, earlier config errors were
-hit and fixed en route (documented for completeness, not hidden): the MoE
-recipe defaults `sequence_parallelism=True`, which asserts unless
-`tensor_parallelism > 1` (fixed in [`run_experiment.py`](scripts/run_experiment.py)
-by forcing it off at `tensor_parallelism=1`, leaving each recipe's own
-default untouched at TP>1); and the
-`data_parallel_size=2` point above, which needed `global_batch_size=2` not
-`1`.
-
-**Takeaway 4 (a real scale limit, not a tuning problem)**: this isn't a
-case where a different batch size or precision setting would fix it - the
-model's expert weights alone (before any activation memory) need ~1.8x
-more HBM than a single H200 has, at this parallelism degree. The fix is
-more GPUs (a real 2x8 cluster could push `expert_parallelism` to 8, halving
-the per-GPU expert share again, or add pipeline parallelism to split
-experts by layer too) or optimizer-state CPU offloading (this repo already
-exposes `--cpu-offload` for activations - Megatron-Core also has a
-`optimizer_cpu_offload` field on `OptimizerConfig` for exactly this, which
-would move the fp32 master/momentum/variance states to host RAM; not
-attempted here to keep this pass focused, but a plausible next step for
-scaling EP further without more GPUs).
-
-### FP8 / attention backend / CPU offload vs the DP=2 baseline
-
-Experiments 6-8 each change exactly one flag from experiment 1's exact
-DP=2/Qwen3-1.7B/seq=4096 baseline - the cleanest single-variable comparisons
-in this whole set:
-
-| Steady-state metric (iters 2-20 avg) | Baseline (BF16, fused attn) | FP8 (exp. 6) | Unfused attn (exp. 7) | CPU offload (exp. 8) |
-|---|---|---|---|---|
-| Step time | 2.29s | 2.06s | 2.30s | 2.27s |
-| Throughput per GPU | 42.0 TFLOP/s | 46.7 TFLOP/s | 41.9 TFLOP/s | 42.4 TFLOP/s |
-| MFU (vs H200 989 TFLOP/s bf16 peak) | 4.25% | 4.73%* | 4.24% | 4.29% |
-| **Peak GPU memory** (MLflow-logged) | **53.3 GB** | **51.1 GB** | **84.3 GB** | **42.9 GB** |
-
-\* FP8's *achieved* TFLOP/s did go up (46.7 vs 42.0), but its *theoretical*
-peak roughly doubles too (H200 FP8 dense peak is ~1979 TFLOP/s vs bf16's
-989) - measured against its own peak, FP8's MFU is actually **lower**
-(2.36%), which is exactly the point of Takeaway 5 below.
-
-**Takeaway 5 (FP8 gives a real but modest speedup here, far short of 2x)**:
-FP8 cut step time by **~10%** (2.29s -> 2.06s) - a genuine, measurable win,
-but nowhere near the ~2x Hopper's FP8 tensor cores nominally offer over
-BF16. At this tiny scale (1.7B params, seq=4096, batch=2/GPU), three things
-eat into that theoretical ceiling: (1) only GEMMs run in FP8 - attention,
-layernorm, and other elementwise ops stay in BF16, so FP8 only speeds up
-part of each layer; (2) `bf16_with_fp8_current_scaling_mixed` computes a
-per-tensor amax/scale factor every step, real overhead that a longer,
-larger run would amortize better; (3) the model/batch here are small enough
-that these matmuls may not be big enough to fully saturate the FP8 tensor
-cores' extra throughput in the first place. Peak memory drops only
-slightly (53.3GB -> 51.1GB, ~4%) since bf16 master weights and optimizer
-state are unchanged - only the compute-path tensors go to FP8.
-
-**Takeaway 6 (attention backend matters for memory here, not speed)**: the
-unfused (plain PyTorch) attention backend is statistically indistinguishable
-from the default fused/FlashAttention path on **throughput** (41.9 vs 42.0
-TFLOP/s/GPU - within run-to-run noise) at this scale, because attention's
-own QK^T/softmax/AV compute is a small fraction of each layer's total FLOPs
-next to the large QKVO and FFN projection matmuls (identical either way).
-But **peak memory jumps 58%** (53.3GB -> 84.3GB), because the unfused path
-explicitly materializes the full `[batch, heads, seq, seq]` attention score
-matrix in HBM, while FlashAttention/fused kernels never do (that's their
-core trick - fusing QK^T -> softmax -> AV so the full matrix is never
-written to HBM). This flips the common assumption that flash attention is
-mainly a speed optimization: at this scale, its *memory* saving is the
-dominant, clearly measurable effect - and that memory gap would only widen
-further at longer sequences (see the CP section above for why: attention
-memory scales with `seq^2` unfused vs roughly linearly for FlashAttention).
-
-**Takeaway 7 (CPU offload's memory saving is essentially free here)**:
-offloading activations to host RAM cut peak GPU memory by **~20%** (53.3GB
--> 42.9GB) with **no measurable throughput cost** (42.0 vs 42.4 TFLOP/s/GPU
-- within noise, if anything slightly faster, plausibly run-to-run
-variance). This isn't offloading being "free" in general - it's specific
-to this scale: with only 20 iterations, a short 4096-token sequence, and a
-1.7B model, the activation volume moved over PCIe each step is small enough
-that the transfer comfortably overlaps with GPU compute and never becomes
-the bottleneck. At a larger batch/sequence/model, or with a slower
-CPU-GPU interconnect, PCIe bandwidth would eventually saturate and this
-trade-off would look more like TP/PP/CP's - real throughput cost for real
-memory savings. This result demonstrates the mechanism working correctly,
-not a claim that offloading is costless at any scale.
-
-### Cross-node NCCL bandwidth - the real number behind "no InfiniBand"
-
-Experiment 9 measured actual `torch.distributed.all_reduce(SUM)` bandwidth
-between the same two nodes, at message sizes from 1 MiB to 1 GiB (20 timed
-iterations each, after 5 warmup iterations):
-
-| Message size | Avg time | Algorithm bandwidth |
-|---|---|---|
-| 1 MiB | 0.86 ms | 1.22 GB/s |
-| 4 MiB | 2.05 ms | 2.05 GB/s |
-| 16 MiB | 7.14 ms | 2.35 GB/s |
-| 64 MiB | 27.86 ms | 2.41 GB/s |
-| 256 MiB | 117.91 ms | 2.28 GB/s |
-| 1024 MiB | 456.31 ms | 2.35 GB/s |
-
-**Takeaway 8 (a real ceiling, not a guess)**: bandwidth ramps up with
-message size (NCCL needs enough data in flight to hide fixed per-call
-latency) and then plateaus around **~2.3-2.4 GB/s** (≈18-19 Gbps) from 16
-MiB onward - a believable number for a standard cloud NIC over plain
-Ethernet/sockets (no RDMA, no InfiniBand), and a small fraction of what
-InfiniBand (typically 200+ Gbps) or intra-node NVLink (900+ GB/s) would
-give the same collective. This is the concrete number behind every "no
-InfiniBand hurt TP/PP" statement made in the takeaways above - TP=2 and
-PP=2 both issue collectives (all-reduces for TP, point-to-point
-activation sends for PP) over exactly this link on every layer of every
-microbatch, so a ~2.3 GB/s ceiling on a link that a 100B+ model's
-per-layer activations/gradients need to cross repeatedly is directly why
-those experiments were communication-bound rather than compute-bound at
-this scale - and exactly the gap real InfiniBand closes for the target
-512x H100 deployment (see `docs/training-strategy-outline.md`'s H100 vs
-H200 note).
-
-### Nsight Systems: where the GPU time actually goes (DP=2 vs TP=2)
-
-[`k8s/profile-dp.yaml`](k8s/profile-dp.yaml) and
-[`k8s/profile-tp.yaml`](k8s/profile-tp.yaml) re-run experiments 1 and 2
-unchanged, with rank 0's `torchrun` wrapped in `nsys profile`, followed by
-`nsys stats --report cuda_gpu_kern_sum` printed to the pod log. The raw
-tables are in [`profiles/`](profiles/); [`scripts/summarize_kernels.py`](scripts/summarize_kernels.py)
-rolls them up by kernel category. Profiling overhead was modest and
-similar for both: steady-state step time 2.48s vs 2.29s unprofiled (DP),
-1.90s vs 1.73s (TP).
-
-| Share of summed GPU kernel time | DP=2 | TP=2 |
-|---|---|---|
-| NCCL communication | **83.9%** | **94.7%** |
-| GEMM (matmul) | 8.2% | 2.4% |
-| Fused/flash attention | 1.8% | 0.6% |
-| Everything else | 6.1% | 2.3% |
-
-These are shares of kernel time summed across CUDA streams, not of wall
-time - NCCL runs on its own stream and overlaps with compute - but the
-direction is unambiguous: **on this link, both runs spend far more GPU time
-in communication kernels than in compute**. That's the kernel-level
-explanation for the 3-10% MFU figures above.
-
-**Takeaway 9 (the profile matches the measured link bandwidth, per
-collective)**: the per-call NCCL times line up with experiment 9's
-~2.35 GB/s, which makes the whole communication story quantitative rather
-than qualitative:
-
-- **TP=2** issues one `AllReduce_Sum_bf16` per attention/MLP block, forward
-  and backward: 5,928 calls, median **14.7 ms** each. Each one moves the
-  block's activation output, `seq 4096 x micro-batch 2 x hidden 2048 x 2
-  bytes` = 33.5 MB - at ~2.38 GB/s (experiment 9's 16-64 MiB range) that
-  predicts **~14.1 ms**. These all-reduces sit on the critical path of every
-  layer, so they can't be hidden behind compute.
-- **DP=2** doesn't do one big all-reduce: Megatron's distributed optimizer
-  (`use_distributed_optimizer: true`, `grad_reduce_in_fp32: true`) splits it
-  into a `ReduceScatter_Sum_f32` of the gradients plus an `AllGather` of the
-  updated bf16 parameters. Each rank sends half of each: 1.72B x 4 bytes / 2
-  = 3.44 GB of gradients (predicts **1.46 s/step**, measured **1.60 s**) and
-  1.72B x 2 bytes / 2 = 1.72 GB of parameters (predicts **0.73 s**, measured
-  **0.82 s**). That's ~2.4 s of communication against a ~2.3-2.5 s step -
-  DP's step time here is essentially *the time to push the gradients and
-  parameters across the link*, with the ~0.4 s/step of real compute
-  overlapped underneath it (`overlap_grad_reduce: true`).
-
-This also sharpens Takeaway 2's PP explanation: PP=2 (micro-batch 1) sends
-one 16.8 MB activation tensor forward and one gradient tensor back across
-the stage boundary per microbatch - ~134 MB per 4-microbatch step,
-point-to-point and overlapped with the other stage's work. That's ~40x less
-than DP's ~5.2 GB per rank per step, and none of it is a per-layer
-synchronous collective like TP's.
-
-*Side note (sequence parallelism)*: a first TP profile was accidentally run
-with `sequence_parallelism=True` (a since-fixed side effect of the EP fix in
-`run_experiment.py`; `qwen3_1p7b`'s recipe default is `False`, which is what
-experiment 2 used). With SP, each all-reduce becomes an `AllGather` +
-`ReduceScatter` pair of the same total volume, but twice the number of
-calls: steady-state step time rose from 1.90s to **2.36s (+24%)** for a
-small memory saving (33.8 GB -> 31.9 GB peak). On a latency-bound link,
-more, smaller collectives cost real time - SP pays off when activation
-memory is the constraint, not here. Kept as
-[`profiles/tp-seqpar-cuda_gpu_kern_sum.txt`](profiles/tp-seqpar-cuda_gpu_kern_sum.txt).
-
-The `.nsys-rep` files themselves stay in each pod's ephemeral filesystem
-(`kubectl cp` needs a running container, and these pods exit when
-training ends). To open a timeline in the Nsight Systems GUI, write the
-report to a mounted volume or object storage instead of `/tmp`.
+The `.nsys-rep` files stay in each pod's ephemeral filesystem. To open a
+timeline in the Nsight Systems GUI, write the report to a mounted volume or
+object storage instead of `/tmp`.
