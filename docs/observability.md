@@ -3,7 +3,7 @@
 ## Setup (done)
 
 - **Nebius Observability Agent for Kubernetes** installed (Helm, `observability`
-  namespace) on the `neb` test cluster — ships pod stdout logs → Nebius
+  namespace) on the PoC's mk8s cluster — ships pod stdout logs → Nebius
   Logging (project-scoped, `--bucket default`), no extra auth needed (uses
   the node's own identity).
 - The agent also has a built-in `dcgmreceiver` for host-level GPU metrics
@@ -26,8 +26,11 @@
   Logging directly — all of its output (including the `nccl_bench` result
   line) showed up within seconds:
   ```bash
-  nebius logging query '{k8s_pod_name="<pod>"}' --bucket default --since 10m
+  nebius logging query '{k8s_job_name="cluster-validator"}' --bucket default \
+    --since 24h --project-id project-e00rdtrppr0083wkrkw4td
   ```
+  (`--project-id` is only needed if the CLI profile's default project is a
+  different one.)
   GPU metrics were verified the same way against the "Nebius Services"
   Prometheus datasource (`DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}`).
 
@@ -68,9 +71,27 @@ storage, training/inference stdout):
   the agent's own `dcgmreceiver` (see above) — but worth knowing if this
   DaemonSet is ever relied upon.
 
+## cluster-validator dashboard
+
+[`cluster-validator/grafana/cluster-validator-dashboard.json`](../cluster-validator/grafana/cluster-validator-dashboard.json)
+(imported into the cluster's Grafana as uid `cluster-validator`) shows GPU
+temperature, utilization and power next to the validator's logs. The agent
+labels every log line with its Kubernetes metadata, so the panels select
+on the Job name:
+
+```logql
+# all output, including the all_reduce_perf table
+{__bucket__="default", k8s_job_name="cluster-validator", k8s_node_name=~"$node"}
+
+# just each check's pass/fail line, storage numbers and the final RESULT line
+{__bucket__="default", k8s_job_name="cluster-validator", k8s_node_name=~"$node"}
+  |~ "\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench)\\] |RESULT:"
+```
+
+The dashboard's time range defaults to 24 hours. If a panel is empty, the
+last run is probably older than that.
+
 ## Next steps (optional)
 
-- Add a Grafana dashboard panel: `{app="cluster-validator"}` logs next to
-  node GPU metrics, for a one-screen view per validation run.
 - If pass/fail thresholds need real alerting later, emit them as metrics
   instead of (or in addition to) log lines.

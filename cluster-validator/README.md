@@ -20,10 +20,13 @@ trade-off.
 ## Build & push
 
 ```bash
-docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:latest .
+docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v2 .
 nebius registry configure-helper
-docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:latest
+docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v2
 ```
+
+Bump the tag on every change and update it in
+[`k8s/job-validate.yaml`](k8s/job-validate.yaml) to match (currently `v2`).
 
 Image lives in the `cluster-validator` registry (`registry-e00qprtt5j85j3syw7`) in the
 `ml-infra-poc` project. The registry path in the image tag is the registry ID
@@ -145,8 +148,16 @@ overall validation exit code (see `upload_logs.py`/`upload_logs.sh`).
 combines GPU temp/utilization/power (from the pre-wired "Nebius Services"
 Prometheus datasource — see [observability.md](../docs/observability.md) for
 why that one and not "Nebius Monitoring") with `cluster-validator` logs
-(from Nebius Logging) on one screen, filterable by node. Import it into
-the cluster's Grafana:
+(from Nebius Logging) on one screen, filterable by node. It defaults to the
+last 24 hours; a validator run lasts minutes, so widen the range to find
+older runs. Two log panels:
+
+- **Check results**: only each check's pass/fail line, the per-path storage
+  numbers and the final `RESULT:` line.
+- **cluster-validator logs**: everything, including the full
+  `all_reduce_perf` bandwidth table.
+
+Import it into the cluster's Grafana:
 
 ```bash
 curl -u admin:<password> -X POST -H "Content-Type: application/json" \
