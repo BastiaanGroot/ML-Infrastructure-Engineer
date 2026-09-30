@@ -167,6 +167,7 @@ the long-sequence rows).
 | Experiment | Change | Step | TFLOP/s/GPU | MFU | Peak mem |
 |---|---|---|---|---|---|
 | `q8b-baseline` | TP2 x DP8 | 1.94 s | **414.9** | 42.0% | 49.2 GB |
+| `q8b-baseline-1node` | TP2 x DP4, one node, global batch 32 | 1.93 s | 416.8 | 42.1% | 55.3 GB |
 | `q8b-dp16` | DP16 | - | - | - | **OOM** |
 | `q8b-dp16-recompute` | DP16 + full recompute | 2.17 s | 369.9* | 37.4%* | 65.5 GB |
 | `q8b-tp4-dp4` | TP4 x DP4 | 2.60 s | 308.7 | 31.2% | 30.2 GB |
@@ -187,6 +188,14 @@ work. Compare step times instead: 2.17 s versus 1.94 s.
 
 What this shows:
 
+- **Adding the second node over InfiniBand scales at 99.5%.** The baseline
+  on one node (same per-GPU work: TP2 x DP4 at half the global batch) runs
+  416.8 TFLOP/s/GPU; on both nodes it's 414.9. DP's gradient reduce-scatter
+  and parameter all-gather cross the nodes but overlap with the backward
+  pass. This is the number to extrapolate from for the 512-GPU reservation:
+  keep TP inside a node and scale out with DP. The one-node run uses 6.1 GB
+  more memory because the distributed optimizer shards its fp32 states over
+  4 DP ranks instead of 8.
 - **TP costs throughput quickly, even on NVLink.** Going from TP2 to TP4 to
   TP8 drops throughput from 415 to 309 to 159 TFLOP/s/GPU. Each GPU's GEMMs
   shrink while the per-layer all-reduces don't. At 8B, TP2 is enough to fit

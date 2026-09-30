@@ -46,6 +46,10 @@ EXPERIMENTS = {
     "q1p7b-pp2-dp8": ({}, "run_experiment.py", f"{Q1P7B} --pipeline-parallelism 2"),
     # Qwen3-8B single-variable suite around a TP2 x DP8 baseline.
     "q8b-baseline": ({}, "run_experiment.py", Q8B_BASE),
+    # Same per-GPU work on one node (TP2 x DP4, half the global batch): the
+    # scaling efficiency of adding the second node over InfiniBand.
+    "q8b-baseline-1node": ({"nodes": 1}, "run_experiment.py",
+                           Q8B_BASE.replace("--global-batch-size 64", "--global-batch-size 32")),
     "q8b-dp16": ({}, "run_experiment.py", Q8B),
     "q8b-dp16-recompute": ({}, "run_experiment.py", f"{Q8B} --recompute"),
     "q8b-tp4-dp4": ({}, "run_experiment.py", f"{Q8B} --tensor-parallelism 4"),

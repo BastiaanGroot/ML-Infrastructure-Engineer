@@ -91,6 +91,9 @@ This is the useful takeaway for the client, now backed by measured runs:
 - The 16-GPU cluster covers real 3D parallelism up to **dense Qwen3-32B**
   and the **30B-A3B MoE** tier. We ran both: Qwen3-32B at TP4 x PP2 x DP2
   (314 TFLOP/s/GPU, 53 GB) and 30B-A3B at EP8 (101 TFLOP/s/GPU, 62 GB).
+- **Scaling out with DP over InfiniBand is nearly free.** Qwen3-8B at
+  TP2 x DP ran 416.8 TFLOP/s/GPU on one node and 414.9 on two with the same
+  per-GPU batch: 99.5% weak-scaling efficiency across the node boundary.
 - **Keep TP and EP inside a node, and cross nodes with DP or PP.** On this
   fabric, a 16-GPU all-reduce reaches 442 GB/s, nearly NVLink's 468 GB/s,
   but small messages and all-to-all still pay for leaving the node:
