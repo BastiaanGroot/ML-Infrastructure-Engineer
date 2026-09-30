@@ -90,17 +90,17 @@ This is the useful takeaway for the client, now backed by measured runs:
 
 - The 16-GPU cluster covers real 3D parallelism up to **dense Qwen3-32B**
   and the **30B-A3B MoE** tier. We ran both: Qwen3-32B at TP4 x PP2 x DP2
-  (314 TFLOP/s/GPU, 53 GB) and 30B-A3B at EP8 (101 TFLOP/s/GPU, 62 GB).
+  (315 TFLOP/s/GPU, 53 GB) and 30B-A3B at EP8 (101 TFLOP/s/GPU, 62 GB).
 - **Scaling out with DP over InfiniBand is nearly free.** Qwen3-8B at
-  TP2 x DP ran 416.8 TFLOP/s/GPU on one node and 414.9 on two with the same
-  per-GPU batch: 99.5% weak-scaling efficiency across the node boundary.
+  TP2 x DP ran 416.6 TFLOP/s/GPU on one node and 415.3 on two with the same
+  per-GPU batch: 99.7% weak-scaling efficiency across the node boundary.
 - **Keep TP and EP inside a node, and cross nodes with DP or PP.** On this
   fabric, a 16-GPU all-reduce reaches 442 GB/s, nearly NVLink's 468 GB/s,
   but small messages and all-to-all still pay for leaving the node:
-  EP16 across nodes was 2.5x slower than EP8. The 512-H100 layout should
+  EP16 across nodes was 2.6x slower than EP8. The 512-H100 layout should
   follow the same rule.
 - **Use the smallest TP that fits.** Qwen3-8B loses 25% throughput going
-  from TP2 to TP4 and 62% at TP8. NVIDIA's own TP8 x PP2 for 32B was 38%
+  from TP2 to TP4 and 61% at TP8. NVIDIA's own TP8 x PP2 for 32B was 39%
   slower on 16 GPUs than TP4 x PP2 x DP2, because it leaves no data
   parallelism.
 - The **235B-A22B flagship needs 64-128 GPUs** per NVIDIA's recipe (TP=4,
