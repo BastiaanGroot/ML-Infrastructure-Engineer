@@ -1,12 +1,49 @@
 # ML Infrastructure Engineer — Take-Home
 
 PoC for the [ML Infrastructure Engineer take-home assignment](docs/ML-Infrastructure-Engineer.md):
-validate a Nebius GPU cluster's capabilities, then run a training/inference
-workload on it on **16x H100 GPUs** (2 nodes x 8, InfiniBand, see
+validate a Nebius GPU cluster's capabilities, then run multi-node LLM
+training on it (Option 1) on **16x H100 GPUs** (2 nodes x 8, InfiniBand, see
 [Hardware](#hardware-2x8-h100-with-infiniband)), a 2TB SSD network disk and a 2TB SSD
 shared filesystem.
 
 **Nebius project:** [`ml-infra-poc`](https://console.nebius.com/project-e00rdtrppr0083wkrkw4td) (tenant `csa-hiring-sandbox2`)
+
+## Reproduce from scratch
+
+Each step links to the README with the details. Values specific to this
+project (project ID, registry ID, SecretStash secret IDs, MLflow endpoint)
+appear in those READMEs; in a new project, take them from `terraform output`
+or the Nebius CLI instead, as noted in each step.
+
+1. **Infrastructure** ([`infra/`](infra/README.md#usage)): network, mk8s
+   cluster with 2x8 H100 on an InfiniBand GPU cluster, shared filesystem,
+   container registry, logs bucket, managed MLflow and the dashboard VM.
+   ```bash
+   cd infra && terraform init
+   terraform apply -var="project_id=<project-id>" -var="enable_mlflow=true" -var="enable_dashboard=true"
+   nebius mk8s cluster get-credentials --id "$(terraform output -raw cluster_id)" --external
+   ```
+   Store the generated MLflow admin password in SecretStash as described in
+   [infra/README.md "MLflow"](infra/README.md#mlflow-for-option-1-experiment-tracking).
+2. **Validator image** ([`cluster-validator/`](cluster-validator/README.md#build--push)):
+   build and push to your registry (`terraform output registry_id`, without
+   the `registry-` prefix), then update the image in `cluster-validator/k8s/*.yaml`.
+3. **Validate the cluster** ([run on the cluster](cluster-validator/README.md#run-on-the-cluster)):
+   create the pull, logs-upload and SSH Secrets, then run the per-node Job
+   (`job-validate.yaml`) and the cross-node InfiniBand Job
+   (`job-validate-multinode.yaml`). Results appear in the Job logs and on the
+   `cluster-validator` [Grafana dashboard](cluster-validator/README.md#grafana-dashboard).
+4. **Training data** ([`training/`](training/README.md#end-to-end-run-qwen3-17b-on-fineweb-edu)):
+   `kubectl apply -f training/k8s/prepare-data.yaml` downloads FineWeb-Edu to
+   the network disk and tokenizes it onto the shared filesystem (~5 min).
+5. **Train** ([`training/`](training/README.md#running)): create the
+   `mlflow-creds` Secret, set `MLFLOW_TRACKING_URI` in `training/launch.py` to
+   `terraform output mlflow_tracking_endpoint`, then
+   `./training/launch.py e2e-q1p7b` for the end-to-end run or any
+   experiment from `./training/launch.py --list`.
+6. **Monitor**: loss and throughput in MLflow, GPU metrics and logs in the
+   cluster's Grafana ([docs/observability.md](docs/observability.md)), and the
+   results [dashboard](dashboard/README.md) (`terraform output dashboard_url`).
 
 ## Infrastructure as Code
 
@@ -14,11 +51,16 @@ shared filesystem.
 
 ## Cluster Validator
 
-[`cluster-validator/`](cluster-validator/) is a lightweight, portable container that checks GPU health, NCCL/GPU-interconnect bandwidth, and storage throughput before running training/inference jobs on the cluster. See its [README](cluster-validator/README.md) for build, push, and run instructions.
+[`cluster-validator/`](cluster-validator/) is a lightweight, portable container that checks every node's GPU health, NVLink bandwidth, PyTorch/LLM stack and storage throughput, plus NCCL bandwidth across both nodes over InfiniBand, before running training jobs on the cluster. See its [README](cluster-validator/README.md) for build, push, run instructions and results.
 
 ## Training (Option 1)
 
-[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) and maps model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) runs the part of it that fits on the 16x H100 cluster: single-variable experiments on Qwen3-1.7B/8B/32B and Qwen3-30B-A3B covering DP, TP, PP, CP, EP, 3D parallelism, FP8, attention backend, CPU offloading and activation recomputation, plus NVLink and InfiniBand NCCL bandwidth sweeps and Nsight Systems profiles, all logged to MLflow. See its [README](training/README.md#results) for the results.
+[`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) and maps model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) runs the part of it that fits on the 16x H100 cluster:
+
+- An **end-to-end run**: Qwen3-1.7B pretrained on ~1B tokens of FineWeb-Edu across both nodes, with checkpoints on the shared filesystem and a resume after a simulated failure.
+- **Single-variable experiments** on Qwen3-1.7B/8B/32B and Qwen3-30B-A3B covering DP, TP, PP, CP, EP, 3D parallelism, FP8, attention backend, CPU offloading and activation recomputation, plus NVLink and InfiniBand NCCL bandwidth sweeps and Nsight Systems profiles.
+
+Everything is logged to MLflow. See the [README](training/README.md#results) for the results.
 
 [`dashboard/`](dashboard/) is a Streamlit app over those results (live from MLflow): strategy comparison, NCCL/Nsight communication view, and an analytical TP x PP x DP planner validated against the measured runs. Hosted on a Terraform-managed VM (public, no auth for now) — see its [README](dashboard/README.md).
 
@@ -28,17 +70,16 @@ This repo has the [Nebius MCP Server](https://github.com/nebius/mcp-server) conf
 
 ## Design Choices
 
-Decisions to make (and record, once made) while executing the [take-home exercise](docs/ML-Infrastructure-Engineer.md), informed by the [Nebius services overview](docs/nebius-services-overview.md).
+Choices made for the [take-home exercise](docs/ML-Infrastructure-Engineer.md), informed by the [Nebius services overview](docs/nebius-services-overview.md).
 
-- [x] Option 1 (training) vs. Option 2 (inference) — starting with **training** (Option 1), inference (Option 2) to follow later.
-- [x] Scheduler — **plain Kubernetes** (Nebius mk8s): multi-node jobs are Indexed Jobs running `torchrun`, with no Slurm or training operator on top.
-- [x] Storage split across the 2TB network disk vs. 2TB shared filesystem — both provisioned and benchmarked (see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run)): network disk (PVC, `compute-csi-default-sc`) as per-job/per-pod scratch, shared filesystem (`virtiofs`, mounted on every GPU node, ~7x faster in `fio`) for shared checkpoints/data across nodes.
-- [ ] Use the **vLLM** turnkey Application, or a custom-built inference server, for Option 2 — needs further exploration before deciding.
-- [x] Benchmark methodology — not running the actual **MLPerf** suite itself (its fixed reference models/datasets and submission/compliance process are a mismatch for a "lightweight, portable" validator and this exercise's scope), but using its metric *definitions* as the reference vocabulary for Option 1/2 results — e.g. throughput per accelerator and time-to-train for Option 1's distribution-strategy comparisons, p50/p99 latency + throughput for Option 2's two configs — so efficiency numbers are explainable in industry-standard terms on demo day.
-- [x] Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces): native Monitoring (PromQL) + Logging (LogQL), fed by the Nebius Observability Agent for Kubernetes, visualized in Grafana. See [docs/observability.md](docs/observability.md).
-- [x] Run logs (e.g. `summary.json`) — optionally uploaded to a Nebius **Object Storage** bucket (`ml-infra-poc-logs`) for retention past Logging's 14-day default; see [cluster-validator/README.md](cluster-validator/README.md#uploading-logs-to-object-storage).
-- [x] Training framework — **NVIDIA NeMo Framework / Megatron-Bridge (Megatron-Core)** over plain FSDP2/DeepSpeed-ZeRO: FSDP/ZeRO shard memory across data-parallel ranks but don't split individual layers/matmuls (tensor parallelism), layers across GPUs (pipeline parallelism), the sequence dimension (context parallelism), or expert routing (expert parallelism) — all first-class in Megatron-Core and necessary building blocks for genuine +100B training. Matches the vacancy doc's explicit mention of Megatron-LM. See [docs/training-strategy-outline.md](docs/training-strategy-outline.md).
-- [x] Model family — **Qwen3** (dense 600M-32B + MoE 30B-A3B/235B-A22B): Apache-2.0, first-class Megatron-Bridge support, and the only family in scope that exercises every strategy above within one lineage, with 235B-A22B as the genuine >100B target.
+- **Option 1 (training).** The customer's first goal is training their own LLM, and the 512-H100 reservation is sized for it. Option 2 (inference) is out of scope for this PoC.
+- Scheduler — **plain Kubernetes** (Nebius mk8s): multi-node jobs are Indexed Jobs running `torchrun` (training) or `mpirun` over SSH (the cross-node validator), with no Slurm, training operator or MPI Operator on top.
+- Storage — both 2TB volumes are in use and benchmarked (see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run)). The **network disk** (PVC, `compute-csi-default-sc`) is per-job scratch: the raw dataset download, and each validator pod's storage test. The **shared filesystem** (`virtiofs`, mounted on every GPU node, ~7x faster in `fio`) holds what every node reads or writes: the tokenized dataset, the HF cache and the training checkpoints.
+- Benchmark methodology — not running the actual **MLPerf** suite itself (its fixed reference models/datasets and submission/compliance process are a mismatch for a "lightweight, portable" validator and this exercise's scope), but using its metric *definitions* (throughput per accelerator, time-to-train) as the reference vocabulary for the distribution-strategy comparisons, so efficiency numbers are explainable in industry-standard terms on demo day.
+- Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces): native Monitoring (PromQL) + Logging (LogQL), fed by the Nebius Observability Agent for Kubernetes, visualized in Grafana. See [docs/observability.md](docs/observability.md).
+- Run logs (e.g. `summary.json`) — optionally uploaded to a Nebius **Object Storage** bucket (`ml-infra-poc-logs`) for retention past Logging's 14-day default; see [cluster-validator/README.md](cluster-validator/README.md#uploading-logs-to-object-storage).
+- Training framework — **NVIDIA NeMo Framework / Megatron-Bridge (Megatron-Core)** over plain FSDP2/DeepSpeed-ZeRO: FSDP/ZeRO shard memory across data-parallel ranks but don't split individual layers/matmuls (tensor parallelism), layers across GPUs (pipeline parallelism), the sequence dimension (context parallelism), or expert routing (expert parallelism) — all first-class in Megatron-Core and necessary building blocks for genuine +100B training. Matches the vacancy doc's explicit mention of Megatron-LM. See [docs/training-strategy-outline.md](docs/training-strategy-outline.md).
+- Model family — **Qwen3** (dense 600M-32B + MoE 30B-A3B/235B-A22B): Apache-2.0, first-class Megatron-Bridge support, and the only family in scope that exercises every strategy above within one lineage, with 235B-A22B as the genuine >100B target.
 
 ## Hardware: 2x8 H100 with InfiniBand
 
