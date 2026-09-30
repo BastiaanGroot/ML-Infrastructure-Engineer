@@ -4,7 +4,7 @@ A lightweight, portable container that validates a Nebius GPU cluster's
 capabilities before running a training or inference job. Covers:
 
 1. **GPU health** — `nvidia-smi` based checks (GPU count, temperature, ECC errors).
-2. **GPU interconnect** — NCCL bandwidth via [`nccl-tests`](https://github.com/NVIDIA/nccl-tests) (NVLink within a node; InfiniBand across nodes for the multi-node variant).
+2. **GPU interconnect** — NCCL `all_reduce` bandwidth via [`nccl-tests`](https://github.com/NVIDIA/nccl-tests): NVLink within each node, and InfiniBand across both nodes (all 16 GPUs, launched with `mpirun`).
 3. **LLM smoketest** — loads a real, minimal Qwen3-0.6B checkpoint (PyTorch + Transformers, same model family as [`training/`](../training/README.md)) and runs a short `generate()` (inference path) plus one forward+backward pass (training path) on GPU, so the actual ML framework stack is validated, not just raw GPU/NCCL numbers.
 4. **Storage throughput** — `fio` against the mounted network disk and shared filesystem.
 
@@ -20,13 +20,14 @@ trade-off.
 ## Build & push
 
 ```bash
-docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3 .
+docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5 .
 nebius registry configure-helper
-docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3
+docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
 ```
 
 Bump the tag on every change and update it in
-[`k8s/job-validate.yaml`](k8s/job-validate.yaml) to match (currently `v3`).
+[`k8s/job-validate.yaml`](k8s/job-validate.yaml) and
+[`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml) to match (currently `v5`).
 
 Image lives in the `cluster-validator` registry (`registry-e00qprtt5j85j3syw7`) in the
 `ml-infra-poc` project. The registry path in the image tag is the registry ID
@@ -39,17 +40,38 @@ nodes are x86_64 (relevant when building from an Apple Silicon Mac).
 docker run --rm --gpus all \
   -v /mnt/network-disk:/mnt/network-disk \
   -v /mnt/shared-fs:/mnt/shared-fs \
-  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:latest
+  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
 ```
 
 ## Run on the cluster
 
-- **Single-node checks** (GPU health + NCCL across the node's 8 GPUs + LLM smoketest + storage): `k8s/job-validate.yaml`
-- **Cross-node InfiniBand bandwidth**: `training/launch.py nccl-16gpu-ib` (all 16 GPUs) and `nccl-2gpu-ib` (one GPU per node), plain Indexed Jobs with no MPI Operator — see [`training/README.md`](../training/README.md#nccl-bandwidth) for the results.
+Two Jobs, both one pod per GPU node (Indexed Jobs with pod anti-affinity):
+
+- **Per-node checks** ([`k8s/job-validate.yaml`](k8s/job-validate.yaml)):
+  GPU health, NCCL across the node's 8 GPUs, LLM smoketest and storage, on
+  every node. Each pod gets its own fresh 2Ti network disk (an ephemeral
+  volume, deleted with the pod) plus the shared filesystem.
+- **Cross-node InfiniBand** ([`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml),
+  [`scripts/nccl_multinode.sh`](scripts/nccl_multinode.sh)): one
+  `all_reduce_perf` process per GPU across all 16 GPUs. Every pod runs
+  `sshd`, and pod 0 launches the processes with `mpirun` over SSH, using the
+  Open MPI already in the base image, so no MPI Operator is needed. The pods
+  are privileged with `/dev/infiniband` mounted, like the training workers.
+  It needs a one-time SSH keypair Secret:
+  ```bash
+  ssh-keygen -t ed25519 -N "" -f /tmp/cv_ssh -q
+  kubectl create secret generic cluster-validator-ssh \
+    --from-file=id_ed25519=/tmp/cv_ssh --from-file=id_ed25519.pub=/tmp/cv_ssh.pub
+  rm /tmp/cv_ssh /tmp/cv_ssh.pub
+  ```
 
 ```bash
 kubectl apply -f k8s/job-validate.yaml
-kubectl logs -f job/cluster-validator
+kubectl logs -l job-name=cluster-validator --prefix --tail=-1   # both nodes, once done
+kubectl delete job cluster-validator                   # both Jobs need the whole cluster
+kubectl apply -f k8s/job-validate-multinode.yaml
+kubectl logs -f job/cluster-validator-multinode        # pod 0 prints the result
+kubectl delete job,svc cluster-validator-multinode
 ```
 
 Node groups need a service account with at least `viewer` role attached to pull
@@ -175,62 +197,47 @@ to Object Storage (see above).
 
 ## Results (last validated run)
 
-Ran via `k8s/job-validate.yaml` on one node of the live cluster (8x H100
-SXM, 2 TiB shared filesystem, 2 TiB network-disk PVC) on 2026-09-29 with
-image `v3`. All checks passed. `summary.json`, as uploaded to
-`s3://ml-infra-poc-logs/cluster-validator/cluster-validator-9fmlp/20260929T143327Z/summary.json`
-(storage numbers rounded):
+Ran on the live cluster (2 nodes x 8 H100 SXM, InfiniBand, 2 TiB shared
+filesystem, a 2 TiB network disk per validator pod): the per-node Job on
+2026-09-29 with image `v4`, the cross-node Job on 2026-09-30 with `v5`
+(which only changes `nccl_multinode.sh`). All checks passed
+on both nodes. Each pod uploads its `summary.json` to
+`s3://ml-infra-poc-logs/cluster-validator/<pod-hostname>/<timestamp>/`.
 
-```json
-[
-  {
-    "name": "gpu_health",
-    "status": "pass",
-    "message": "8 GPU(s) healthy, max temp 25C",
-    "metrics": { "gpu_count": 8, "max_temp_c": 25, "uncorrectable_ecc_errors": 0, "corrected_ecc_errors": 0 }
-  },
-  {
-    "name": "llm_smoketest",
-    "status": "pass",
-    "message": "generated 20 tokens and completed a backward pass on NVIDIA H100 80GB HBM3",
-    "metrics": { "device_name": "NVIDIA H100 80GB HBM3", "load_seconds": 1.349, "generation_seconds": 2.782, "tokens_generated": 20, "backward_pass_ok": true }
-  },
-  {
-    "name": "nccl_bench",
-    "status": "pass",
-    "message": "avg bus bandwidth 467.92 GB/s across 8 GPU(s)",
-    "metrics": { "gpu_count": 8, "avg_busbw_gbps": 467.92, "out_of_bounds": 0 }
-  },
-  {
-    "name": "storage_bench",
-    "status": "pass",
-    "message": "storage benchmark completed for: /mnt/network-disk, /mnt/shared-fs",
-    "metrics": {
-      "paths": [
-        { "path": "/mnt/network-disk", "read_bw_mbps": 217.8, "write_bw_mbps": 222.6, "read_iops": 217.8, "write_iops": 222.6 },
-        { "path": "/mnt/shared-fs", "read_bw_mbps": 1616.4, "write_bw_mbps": 1618.8, "read_iops": 1616.4, "write_iops": 1618.8 }
-      ]
-    }
-  }
-]
-```
+**Per node** ([`k8s/job-validate.yaml`](k8s/job-validate.yaml)):
+
+| Check | Node `computeinstance-e00qyx0nfcpnbgnk4z` | Node `computeinstance-e00gdss5xpj5gbybcs` |
+|---|---|---|
+| GPU health | 8 GPUs, max 26°C, 0 ECC errors | 8 GPUs, max 34°C, 0 ECC errors |
+| NCCL, 8 GPUs over NVLink (avg bus bandwidth) | 467.9 GB/s | 465.7 GB/s |
+| LLM smoketest (Qwen3-0.6B generate + backward) | pass | pass |
+| Network disk, read / write | 217 / 222 MB/s | 218 / 223 MB/s |
+| Shared filesystem, read / write | 1570 / 1572 MB/s | 1669 / 1673 MB/s |
+
+**Across nodes** ([`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml)):
+`all_reduce_perf` over all 16 GPUs averages **450.8 GB/s** bus bandwidth
+(threshold 300), with 0 out-of-bounds values:
+
+| Message size | 512 MiB | 1 GiB | 2 GiB | 4 GiB | 8 GiB |
+|---|---|---|---|---|---|
+| Bus bandwidth (out-of-place) | 414.6 GB/s | 446.8 GB/s | 459.5 GB/s | 465.9 GB/s | 459.7 GB/s |
 
 **Reading these:**
 
-- **GPU health**: all 8 H100s visible and healthy, 25°C idle, zero ECC errors.
-- **NCCL bench**: `all_reduce_perf` across the node's 8 GPUs (512 MiB-8 GiB)
-  averages **468 GB/s** bus bandwidth over NVLink, well above the 100 GB/s
-  threshold. It matches the 468 GB/s the training NCCL sweep measured at
-  1 GiB (see [`training/README.md`](../training/README.md#nccl-bandwidth),
-  which also covers cross-node InfiniBand).
+- **GPU health**: all 16 H100s visible and healthy, zero ECC errors.
+- **NCCL**: within a node, NVLink averages ~467 GB/s over 512 MiB-8 GiB,
+  well above the 100 GB/s threshold. Across both nodes, all 16 GPUs reach
+  447 GB/s at 1 GiB, within a few percent of NVLink, because NCCL uses all
+  8 InfiniBand NICs per node. This matches the training NCCL sweep's
+  442 GB/s (see [`training/README.md`](../training/README.md#nccl-bandwidth)).
 - **LLM smoketest**: a real Qwen3-0.6B checkpoint (same model family as
   [`training/`](../training/README.md)) generates 20 tokens and completes a
   forward and backward pass on GPU, so the PyTorch/CUDA/Transformers stack
   works end to end, not just `nvidia-smi`.
-- **Storage bench**: the network-disk PVC (`compute-csi-default-sc`, a
-  Nebius Network SSD volume) does ~220 MB/s read and write. The shared
-  filesystem (`virtiofs`) does ~1.6 GB/s, about 7x faster; the gap comes
-  from the storage backends, not misconfiguration. No
+- **Storage bench**: the network disk (`compute-csi-default-sc`, a Nebius
+  Network SSD volume) does ~220 MB/s read and write on both nodes. The
+  shared filesystem (`virtiofs`) does ~1.6 GB/s, about 7x faster; the gap
+  comes from the storage backends, not misconfiguration. No
   `FIO_MIN_THROUGHPUT_MBPS` threshold was set, so both just report numbers.
 
 **Live view while a job runs:** the [Grafana dashboard](#grafana-dashboard)

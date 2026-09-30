@@ -3,8 +3,7 @@
 # already bundled in the base image (see Dockerfile).
 #
 # This checks single-node interconnect (NVLink/PCIe between local GPUs).
-# Cross-node InfiniBand bandwidth is measured by training/'s NCCL sweep
-# (training/launch.py nccl-16gpu-ib / nccl-2gpu-ib).
+# Cross-node InfiniBand is checked by nccl_multinode.sh.
 #
 # Env vars:
 #   NCCL_BENCH_ARGS      - override args passed to all_reduce_perf.

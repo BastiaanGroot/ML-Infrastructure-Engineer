@@ -26,7 +26,7 @@
   Logging directly — all of its output (including the `nccl_bench` result
   line) showed up within seconds:
   ```bash
-  nebius logging query '{k8s_job_name="cluster-validator"}' --bucket default \
+  nebius logging query '{k8s_job_name=~"cluster-validator.*"}' --bucket default \
     --since 24h --project-id project-e00rdtrppr0083wkrkw4td
   ```
   (`--project-id` is only needed if the CLI profile's default project is a
@@ -81,11 +81,11 @@ on the Job name:
 
 ```logql
 # all output, including the all_reduce_perf table
-{__bucket__="default", k8s_job_name="cluster-validator", k8s_node_name=~"$node"}
+{__bucket__="default", k8s_job_name=~"cluster-validator.*", k8s_node_name=~"$node"}
 
 # just each check's pass/fail line, storage numbers and the final RESULT line
-{__bucket__="default", k8s_job_name="cluster-validator", k8s_node_name=~"$node"}
-  |~ "\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench)\\] |RESULT:"
+{__bucket__="default", k8s_job_name=~"cluster-validator.*", k8s_node_name=~"$node"}
+  |~ "\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\] |RESULT:"
 ```
 
 The dashboard's time range defaults to 24 hours. If a panel is empty, the

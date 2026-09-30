@@ -1,0 +1,82 @@
+# Cross-node validation Job: NCCL all_reduce across every GPU on both nodes
+# over InfiniBand (scripts/nccl_multinode.sh). One pod per node; pod 0 runs
+# mpirun over SSH, using the Open MPI and sshd already in the base image, so
+# no MPI Operator is needed.
+#
+# One-time: an SSH keypair shared by the pods:
+#   ssh-keygen -t ed25519 -N "" -f /tmp/cv_ssh -q
+#   kubectl create secret generic cluster-validator-ssh \
+#     --from-file=id_ed25519=/tmp/cv_ssh --from-file=id_ed25519.pub=/tmp/cv_ssh.pub
+#   rm /tmp/cv_ssh /tmp/cv_ssh.pub
+#
+# Pods are privileged with the host's /dev/infiniband mounted, like the
+# training workers (the nodes don't advertise RDMA devices to Kubernetes -
+# see the root README's Hardware section).
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster-validator-multinode
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    job-name: cluster-validator-multinode
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cluster-validator-multinode
+  namespace: default
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: cluster-validator-multinode
+    spec:
+      subdomain: cluster-validator-multinode
+      restartPolicy: Never
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: cluster-validator-multinode
+              topologyKey: kubernetes.io/hostname
+      imagePullSecrets:
+        - name: nebius-registry
+      volumes:
+        - name: infiniband
+          hostPath:
+            path: /dev/infiniband
+        - name: ssh-key
+          secret:
+            secretName: cluster-validator-ssh
+            defaultMode: 0400
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+      containers:
+        - name: cluster-validator
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
+          command: ["/opt/validate/nccl_multinode.sh"]
+          securityContext:
+            privileged: true
+          env:
+            - name: NNODES
+              value: "2"
+            - name: GPUS_PER_NODE
+              value: "8"
+            - name: PEER_HOST_PATTERN
+              value: "cluster-validator-multinode-{i}.cluster-validator-multinode.default.svc.cluster.local"
+          resources:
+            limits:
+              nvidia.com/gpu: 8
+          volumeMounts:
+            - {name: infiniband, mountPath: /dev/infiniband}
+            - {name: ssh-key, mountPath: /etc/ssh-key}
+            - {name: dshm, mountPath: /dev/shm}

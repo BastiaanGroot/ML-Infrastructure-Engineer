@@ -1,10 +1,11 @@
-# Single-node validation Job: GPU health + single-node NCCL + storage
-# throughput (network disk via PVC, shared filesystem via hostPath).
+# Per-node validation Job: one pod on each GPU node (Indexed Job, pod
+# anti-affinity) running GPU health + single-node NCCL + LLM smoketest +
+# storage throughput (network disk + shared filesystem). Cross-node
+# InfiniBand is checked separately by job-validate-multinode.yaml.
 #
 # Adjust:
-#   - image: points at the cluster-validator image pushed to the Nebius
-#     Container Registry (registry-e00qprtt5j85j3syw7 in ml-infra-poc):
-#     cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:latest
+#   - completions/parallelism: the number of GPU nodes
+#   - image: the cluster-validator image in your Container Registry
 #   - nvidia.com/gpu: match the node's GPU count
 #   - the shared-fs hostPath to match how your node group mounts it
 #     (see the mount_tag/cloud-init in your node group spec)
@@ -14,10 +15,23 @@ metadata:
   name: cluster-validator
   namespace: default
 spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
   backoffLimit: 0
   template:
+    metadata:
+      labels:
+        app: cluster-validator
     spec:
       restartPolicy: Never
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: cluster-validator
+              topologyKey: kubernetes.io/hostname
       # Requires a `nebius-registry` imagePullSecret if the node group's
       # service account lacks Container Registry viewer access — see
       # cluster-validator/README.md "Pulling the image" section.
@@ -25,7 +39,7 @@ spec:
         - name: nebius-registry
       containers:
         - name: cluster-validator
-          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v3
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
           envFrom:
             - secretRef:
                 # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the logs
@@ -46,23 +60,17 @@ spec:
             - name: shared-fs
               mountPath: /mnt/shared-fs
       volumes:
+        # A fresh network disk per pod, deleted with it. 2Ti matches the
+        # PoC's 2TB network disk (Nebius network SSD throughput scales with size).
         - name: network-disk
-          persistentVolumeClaim:
-            claimName: cluster-validator-network-disk
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                resources:
+                  requests:
+                    storage: 2Ti
         - name: shared-fs
           hostPath:
             path: /mnt/filesystem-s6
             type: Directory
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: cluster-validator-network-disk
-  namespace: default
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      # 2Ti matches the exercise's PoC environment spec (2TB network disk).
-      storage: 2Ti
