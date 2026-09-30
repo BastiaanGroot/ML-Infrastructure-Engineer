@@ -36,7 +36,8 @@ browsable in the [dashboard](../dashboard/README.md).
   trains on real data with checkpoints. Metrics are
   steady-state averages over iterations 2-20, from Megatron's own
   per-iteration log (`steady_step_time_sec`, `steady_tflops_per_gpu`).
-  MFU is against the H100's 989 TFLOP/s bf16 dense peak.
+  MFU is `steady_tflops_per_gpu` against the H100's 989 TFLOP/s bf16 dense
+  peak, including for FP8 runs.
 
 ## Running
 
@@ -49,8 +50,9 @@ kubectl create secret generic mlflow-creds \
       --secret-id "$(terraform -chdir=../infra output -raw mlflow_password_secret_id)" --key password --format json \
       | grep -v "token from" | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["string_value"],end="")')
 
-# Optional: point launch.py at another MLflow (defaults to this PoC's endpoint)
-export MLFLOW_TRACKING_URI=https://$(terraform -chdir=../infra output -raw mlflow_tracking_endpoint)
+# Optional: launch.py defaults to `terraform output mlflow_tracking_endpoint`
+# from ../infra; set this to use another MLflow
+export MLFLOW_TRACKING_URI=https://<your-mlflow-endpoint>
 
 ./launch.py --list                      # all experiment names
 ./launch.py q8b-baseline
@@ -104,7 +106,7 @@ kubectl logs -f job/prepare-data
 |---|---|---|---|---|---|---|---|
 | Training loss | 12.32 | 7.27 | 6.53 | 5.35 | 4.24 | 3.86 | **3.68** |
 
-Steady state: **2.09 s** per iteration, **368 TFLOP/s/GPU** (32% MFU),
+Steady state: **2.09 s** per iteration, **368 TFLOP/s/GPU** (37% MFU),
 31.3k tokens/s per GPU (502k tokens/s for the cluster), 44.3 GB peak
 memory. That matches the synthetic-data `q1p7b-dp16` run (349 TFLOP/s at
 global batch 32), so real data loading from the shared filesystem costs no

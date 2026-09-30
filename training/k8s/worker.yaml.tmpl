@@ -95,7 +95,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              pip install --quiet mlflow-skinny
+              pip install --quiet mlflow-skinny==3.16.1
               cd /opt/Megatron-Bridge
               export PYTHONPATH=/opt/Megatron-Bridge/src:/opt/megatron-lm:${PYTHONPATH:-}
               # Privileged containers see every GPU on the node regardless of

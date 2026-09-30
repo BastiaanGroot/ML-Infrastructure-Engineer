@@ -17,21 +17,16 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MLFLOW_TRACKING_URI = os.environ.get(
-    "MLFLOW_TRACKING_URI",
-    "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud",
-)
 
-Q1P7B = "--model qwen3-1p7b --approx-num-params 1.7e9 --micro-batch-size 2 --global-batch-size 32"
-Q8B = "--model qwen3-8b --approx-num-params 8.2e9 --micro-batch-size 1 --global-batch-size 64"
+Q1P7B = "--model qwen3-1p7b --micro-batch-size 2 --global-batch-size 32"
+Q8B = "--model qwen3-8b --micro-batch-size 1 --global-batch-size 64"
 Q8B_BASE = f"{Q8B} --tensor-parallelism 2"
-Q8B_LONG = "--model qwen3-8b --approx-num-params 8.2e9 --micro-batch-size 1 --global-batch-size 32 --seq-length 16384 --tensor-parallelism 2"
-# Active (not total) params: 6ND FLOPs only count the experts a token visits.
-Q30B_A3B = "--model qwen3-30b-a3b --approx-num-params 3.3e9 --micro-batch-size 1 --global-batch-size 64"
-Q32B = "--model qwen3-32b --approx-num-params 32.8e9 --micro-batch-size 1 --global-batch-size 64"
+Q8B_LONG = "--model qwen3-8b --micro-batch-size 1 --global-batch-size 32 --seq-length 16384 --tensor-parallelism 2"
+Q30B_A3B = "--model qwen3-30b-a3b --micro-batch-size 1 --global-batch-size 64"
+Q32B = "--model qwen3-32b --micro-batch-size 1 --global-batch-size 64"
 # Real FineWeb-Edu data (k8s/prepare-data.yaml): 1000 x 256 x 4096 = ~1B tokens.
 E2E = (
-    "--model qwen3-1p7b --approx-num-params 1.7e9 --micro-batch-size 2 --global-batch-size 256"
+    "--model qwen3-1p7b --micro-batch-size 2 --global-batch-size 256"
     " --train-iters 1000 --lr-warmup-iters 50 --run-kind e2e"
     " --data-path /mnt/shared-fs/data/fineweb-edu/fineweb-edu_text_document"
     " --checkpoint-dir /mnt/shared-fs/checkpoints/e2e-q1p7b --save-interval 250"
@@ -85,6 +80,22 @@ def kubectl(*args, stdin=None):
     return subprocess.run(["kubectl", *args], input=stdin, text=True, check=True, capture_output=True).stdout
 
 
+def mlflow_tracking_uri() -> str:
+    """$MLFLOW_TRACKING_URI, else the endpoint of the MLflow that infra/ created."""
+    if uri := os.environ.get("MLFLOW_TRACKING_URI"):
+        return uri
+    try:
+        endpoint = subprocess.run(
+            ["terraform", f"-chdir={HERE.parent / 'infra'}", "output", "-raw", "mlflow_tracking_endpoint"],
+            text=True, check=True, capture_output=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        endpoint = ""
+    if not endpoint:
+        sys.exit("Set MLFLOW_TRACKING_URI, or apply infra/ so `terraform output mlflow_tracking_endpoint` works.")
+    return f"https://{endpoint}"
+
+
 def render(name: str) -> str:
     options, script, args = EXPERIMENTS[name]
     script_args = f"{args} --mlflow-run-name {name}".strip()
@@ -98,7 +109,7 @@ def render(name: str) -> str:
         "SCRIPT_ARGS": script_args,
         "PROFILE": "1" if options.get("profile") else "0",
         "NCCL_DEBUG": os.environ.get("NCCL_DEBUG", "WARN"),
-        "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI,
+        "MLFLOW_TRACKING_URI": mlflow_tracking_uri(),
     }
     text = (HERE / "k8s" / "worker.yaml.tmpl").read_text()
     for key, value in values.items():

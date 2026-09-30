@@ -38,9 +38,9 @@ or the Nebius CLI instead, as noted in each step.
    `kubectl apply -f training/k8s/prepare-data.yaml` downloads FineWeb-Edu to
    the network disk and tokenizes it onto the shared filesystem (~5 min).
 5. **Train** ([`training/`](training/README.md#running)): create the
-   `mlflow-creds` Secret, export `MLFLOW_TRACKING_URI` as `https://` plus
-   `terraform output mlflow_tracking_endpoint`, then
-   `./training/launch.py e2e-q1p7b` for the end-to-end run or any
+   `mlflow-creds` Secret, then run
+   `./training/launch.py e2e-q1p7b` (it reads the MLflow endpoint from
+   `terraform output`) for the end-to-end run or any
    experiment from `./training/launch.py --list`.
 6. **Monitor**: loss and throughput in MLflow, GPU metrics and logs in the
    cluster's Grafana ([docs/observability.md](docs/observability.md)), and the

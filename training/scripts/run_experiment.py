@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Thin launch script: run one Qwen3 Megatron-Bridge pretrain recipe under
-torchrun and log throughput/memory/MFU to MLflow. With --data-path it trains
+torchrun and log throughput/memory to MLflow. With --data-path it trains
 on a real tokenized dataset instead of mock data, logs the loss live, and
 (with --checkpoint-dir) saves and resumes checkpoints.
 
@@ -22,13 +22,15 @@ Usage (invoked by torchrun from ../k8s/worker.yaml.tmpl via ../launch.py):
         --master-addr=$MASTER_ADDR --master-port=$MASTER_PORT \
         run_experiment.py --model qwen3-8b --tensor-parallelism 2 \
         --global-batch-size 64 --micro-batch-size 1 \
-        --approx-num-params 8.2e9 --mlflow-run-name q8b-baseline
+        --mlflow-run-name q8b-baseline
+
+MFU isn't logged: the README and dashboard compute it as steady_tflops_per_gpu
+(Megatron's own FLOP count) over the H100's 989 TFLOP/s bf16 dense peak.
 """
 
 import argparse
 import os
 import re
-import time
 
 import torch
 
@@ -103,11 +105,7 @@ def start_or_resume_run(mlflow, experiment: str, run_name: str, run_kind: str):
         return mlflow.start_run(run_id=existing[0].info.run_id)
     return mlflow.start_run(run_name=run_name)
 
-# H100 SXM dense tensor-core peaks per NVIDIA's datasheet - used only as the
-# denominator for the approximate MFU estimate below. FP8 dense peak is ~2x
-# bf16 on Hopper, so we pick the right one based on --precision.
-H100_BF16_PEAK_FLOPS_PER_GPU = 989e12
-H100_FP8_PEAK_FLOPS_PER_GPU = 1979e12
+
 CLUSTER_TAGS = {"cluster": "2x8-h100-ib", "gpu": "H100"}
 
 # module path, is_moe (whether the recipe's pretrain_config() accepts
@@ -170,13 +168,6 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Full activation recomputation for every layer (trades ~1/3 more compute for activation memory).",
     )
-    parser.add_argument(
-        "--approx-num-params",
-        type=float,
-        required=True,
-        help="Labeled model size (e.g. 1.7e9) used for the approximate MFU estimate "
-        "- not a profiler-measured FLOP count, see README's Results section caveat.",
-    )
     parser.add_argument("--mlflow-experiment", default="qwen3-parallelism-experiments")
     parser.add_argument("--mlflow-run-name", required=True)
     parser.add_argument(
@@ -208,10 +199,13 @@ def run_params(args: argparse.Namespace, world_size: int) -> dict:
         "attention_backend": args.attention_backend or "default",
         "cpu_offload": args.cpu_offload,
         "recompute": args.recompute,
-        "approx_num_params": args.approx_num_params,
         "nnodes": world_size // int(os.environ["LOCAL_WORLD_SIZE"]),
         "gpus_per_node": int(os.environ["LOCAL_WORLD_SIZE"]),
     }
+
+
+def tokens_per_sec_per_gpu(args: argparse.Namespace, step_time_sec: float, world_size: int) -> float:
+    return args.global_batch_size * args.seq_length / step_time_sec / world_size
 
 
 def log_live_summary(mlflow, args: argparse.Namespace, iters: list, world_size: int) -> None:
@@ -228,13 +222,10 @@ def log_live_summary(mlflow, args: argparse.Namespace, iters: list, world_size: 
     steady = iters[1:]
     if steady:
         step_time = sum(s for _, s, _, _ in steady) / len(steady)
-        tokens_per_sec_per_gpu = args.global_batch_size * args.seq_length / step_time / world_size
-        peak_flops_per_gpu = H100_FP8_PEAK_FLOPS_PER_GPU if "fp8" in args.precision else H100_BF16_PEAK_FLOPS_PER_GPU
         metrics = {
             "steady_step_time_sec": step_time,
             "steady_tflops_per_gpu": sum(t for _, _, t, _ in steady) / len(steady),
-            "tokens_per_sec_per_gpu": tokens_per_sec_per_gpu,
-            "approx_mfu_pct": 100 * 6 * args.approx_num_params * tokens_per_sec_per_gpu / peak_flops_per_gpu,
+            "tokens_per_sec_per_gpu": tokens_per_sec_per_gpu(args, step_time, world_size),
             "peak_gpu_memory_gb": torch.cuda.max_memory_allocated() / 1e9,
             "final_lm_loss": iters[-1][3],
         }
@@ -269,7 +260,7 @@ def main() -> None:
     # Sequence parallelism requires tensor_parallelism > 1 (Megatron-Core
     # asserts otherwise), but the qwen3_30b_a3b MoE recipe defaults it to True
     # regardless. Only force it off at TP=1; at TP>1 keep each recipe's own
-    # default (False for qwen3_1p7b) so experiment-02's documented config holds.
+    # default (False for qwen3_1p7b).
     if args.tensor_parallelism == 1:
         recipe_kwargs["sequence_parallelism"] = False
     cfg = recipes.pretrain_config(**recipe_kwargs)
@@ -318,9 +309,7 @@ def main() -> None:
 
     steps = capture_step_logs()
     torch.cuda.reset_peak_memory_stats()
-    start = time.monotonic()
     pretrain(cfg, forward_step)
-    elapsed_sec = time.monotonic() - start
 
     if live:
         if rank == world_size - 1:
@@ -329,34 +318,15 @@ def main() -> None:
     if rank != 0:
         return  # Only rank 0 writes results - avoid duplicate MLflow runs.
 
-    peak_mem_gb = torch.cuda.max_memory_allocated() / 1e9
-    tokens_per_iter = args.global_batch_size * args.seq_length
-    total_tokens = tokens_per_iter * args.train_iters
-    tokens_per_sec = total_tokens / elapsed_sec
-    tokens_per_sec_per_gpu = tokens_per_sec / world_size
-    step_time_sec = elapsed_sec / args.train_iters
-
-    # Standard 6ND approximation (forward+backward FLOPs per token = 6 x
-    # param count) for achieved FLOPs/sec, divided by (world_size x per-GPU
-    # peak) for MFU. Approximate - see --approx-num-params help above.
-    achieved_flops_per_sec = 6 * args.approx_num_params * total_tokens / elapsed_sec
-    peak_flops_per_gpu = H100_FP8_PEAK_FLOPS_PER_GPU if "fp8" in args.precision else H100_BF16_PEAK_FLOPS_PER_GPU
-    mfu = achieved_flops_per_sec / (world_size * peak_flops_per_gpu)
-
-    metrics = {
-        "wall_time_sec": elapsed_sec,
-        "step_time_sec": step_time_sec,
-        "tokens_per_sec": tokens_per_sec,
-        "tokens_per_sec_per_gpu": tokens_per_sec_per_gpu,
-        "peak_gpu_memory_gb": peak_mem_gb,
-        "approx_mfu_pct": mfu * 100,
-    }
+    metrics = {"peak_gpu_memory_gb": torch.cuda.max_memory_allocated() / 1e9}
     # Iteration 1 includes kernel warmup/compilation - the README's
     # steady-state tables average iterations 2..N, and so does this.
     steady = steps[1:]
     if steady:
-        metrics["steady_step_time_sec"] = sum(s for s, _ in steady) / len(steady)
+        step_time = sum(s for s, _ in steady) / len(steady)
+        metrics["steady_step_time_sec"] = step_time
         metrics["steady_tflops_per_gpu"] = sum(t for _, t in steady) / len(steady)
+        metrics["tokens_per_sec_per_gpu"] = tokens_per_sec_per_gpu(args, step_time, world_size)
 
     print(f"=== Results: {metrics} ===")
     import mlflow  # Installed at container startup - see ../k8s/*.yaml.
