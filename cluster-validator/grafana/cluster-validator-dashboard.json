@@ -80,7 +80,7 @@
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "{__bucket__=\"default\", k8s_job_name=~\"cluster-validator.*\", k8s_node_name=~\"$node\"} |~ \"\\\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\\\] |RESULT:\""
+          "expr": "{__bucket__=\"default\", k8s_job_name=~\"cluster-validator.*\", k8s_node_name=~\"$node\"} |~ \"\\\\[(gpu_health|gpu_compute|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\\\] |RESULT:\""
         }
       ]
     },

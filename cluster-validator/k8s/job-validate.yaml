@@ -39,7 +39,7 @@ spec:
         - name: nebius-registry
       containers:
         - name: cluster-validator
-          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v9
           envFrom:
             - secretRef:
                 # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the logs
@@ -55,6 +55,10 @@ spec:
               value: "8"
             - name: NCCL_MIN_BUSBW_GBPS
               value: "400"
+            # bf16 8192^3 GEMM: 683-709 TFLOP/s per H100 measured at the
+            # 700 W power cap; 600 is ~85%.
+            - name: GPU_MIN_TFLOPS
+              value: "600"
             - name: STORAGE_PATHS
               value: "/mnt/network-disk,/mnt/shared-fs"
             - name: UPLOAD_LOGS_BUCKET

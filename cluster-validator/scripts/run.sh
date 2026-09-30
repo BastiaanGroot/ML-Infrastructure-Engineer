@@ -2,7 +2,8 @@
 # Entrypoint: runs the enabled checks and prints/writes an aggregate summary.
 #
 # Env vars (all default to true/enabled):
-#   RUN_GPU_HEALTH, RUN_NCCL, RUN_LLM_SMOKETEST, RUN_STORAGE  - set to "false" to skip a check.
+#   RUN_GPU_HEALTH, RUN_GPU_COMPUTE, RUN_NCCL,
+#   RUN_LLM_SMOKETEST, RUN_STORAGE                            - set to "false" to skip a check.
 #   RESULTS_DIR                                               - where per-check JSON is written (default: /results).
 #   UPLOAD_LOGS_BUCKET                                        - if set, uploads summary.json to this Object Storage bucket.
 #
@@ -27,6 +28,7 @@ run_check() {
 }
 
 run_check "gpu_health.sh"     "${RUN_GPU_HEALTH:-true}"
+run_check "gpu_compute.py"    "${RUN_GPU_COMPUTE:-true}"
 run_check "nccl_bench.sh"     "${RUN_NCCL:-true}"
 run_check "llm_smoketest.sh"  "${RUN_LLM_SMOKETEST:-true}"
 run_check "storage_bench.sh"  "${RUN_STORAGE:-true}"

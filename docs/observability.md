@@ -85,7 +85,7 @@ on the Job name:
 
 # just each check's pass/fail line, storage numbers and the final RESULT line
 {__bucket__="default", k8s_job_name=~"cluster-validator.*", k8s_node_name=~"$node"}
-  |~ "\\[(gpu_health|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\] |RESULT:"
+  |~ "\\[(gpu_health|gpu_compute|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\] |RESULT:"
 ```
 
 The dashboard's time range defaults to 24 hours. If a panel is empty, the

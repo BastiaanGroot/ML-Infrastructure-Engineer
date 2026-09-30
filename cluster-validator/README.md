@@ -3,10 +3,11 @@
 A lightweight, portable container that validates a Nebius GPU cluster's
 capabilities before running a training or inference job. Covers:
 
-1. **GPU health** — `nvidia-smi` based checks (GPU count, temperature, ECC errors).
-2. **GPU interconnect** — NCCL `all_reduce` bandwidth via [`nccl-tests`](https://github.com/NVIDIA/nccl-tests): NVLink within each node, and InfiniBand across both nodes (all 16 GPUs, launched with `mpirun`).
-3. **LLM smoketest** — loads a real, minimal Qwen3-0.6B checkpoint (PyTorch + Transformers, same model family as [`training/`](../training/README.md)) and runs a short `generate()` (inference path) plus one forward+backward pass (training path) on GPU, so the actual ML framework stack is validated, not just raw GPU/NCCL numbers.
-4. **Storage throughput** — `fio` against the mounted network disk and shared filesystem.
+1. **GPU health** — `nvidia-smi` based checks (GPU count, temperature, ECC errors, pending/failed row remaps).
+2. **GPU compute** — bf16 GEMM throughput on all GPUs at once for 30 s, failing any GPU below an absolute floor or 90% of the node median, plus temperature and thermal/hardware clock slowdown read *under load* ([`scripts/gpu_compute.py`](scripts/gpu_compute.py)). Catches a single slow or throttling GPU, which the interconnect tests can't.
+3. **GPU interconnect** — NCCL `all_reduce` bandwidth via [`nccl-tests`](https://github.com/NVIDIA/nccl-tests): NVLink within each node, and InfiniBand across both nodes (all 16 GPUs, launched with `mpirun`), after a pre-flight that every node has 8 InfiniBand ports `ACTIVE` at 400 Gb/s.
+4. **LLM smoketest** — loads a real, minimal Qwen3-0.6B checkpoint (PyTorch + Transformers, same model family as [`training/`](../training/README.md)) and runs a short `generate()` (inference path) plus one forward+backward pass (training path) on GPU, so the actual ML framework stack is validated, not just raw GPU/NCCL numbers.
+5. **Storage throughput** — `fio` against the mounted network disk and shared filesystem.
 
 Built on top of Nebius's own public benchmark image
 (`cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests`), which already
@@ -20,14 +21,14 @@ trade-off.
 ## Build & push
 
 ```bash
-docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7 .
+docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v9 .
 nebius registry configure-helper
-docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
+docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v9
 ```
 
 Bump the tag on every change and update it in
 [`k8s/job-validate.yaml`](k8s/job-validate.yaml) and
-[`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml) to match (currently `v7`).
+[`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml) to match (currently `v9`).
 
 Image lives in the `cluster-validator` registry (`registry-e00qprtt5j85j3syw7`) in the
 `ml-infra-poc` project. The registry path in the image tag is the registry ID
@@ -40,7 +41,7 @@ nodes are x86_64 (relevant when building from an Apple Silicon Mac).
 docker run --rm --gpus all \
   -v /mnt/network-disk:/mnt/network-disk \
   -v /mnt/shared-fs:/mnt/shared-fs \
-  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
+  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v9
 ```
 
 ## Run on the cluster
@@ -93,15 +94,21 @@ kubectl create secret docker-registry nebius-registry \
 All checks are controlled via environment variables (see comments at the top of each script in `scripts/`).
 The script defaults are deliberately generic; the Job YAMLs set acceptance
 thresholds for this cluster's 8x H100 nodes at ~85-90% of the measured
-bandwidth (`EXPECTED_GPU_COUNT=8`, `NCCL_MIN_BUSBW_GBPS=400`,
-`NCCL_MULTINODE_MIN_BUSBW_GBPS=400`), so a single degraded NVLink or
-InfiniBand NIC fails the run instead of passing a loose floor.
+values (`EXPECTED_GPU_COUNT=8`, `GPU_MIN_TFLOPS=600`,
+`NCCL_MIN_BUSBW_GBPS=400`, `NCCL_MULTINODE_MIN_BUSBW_GBPS=400`), so a single
+slow GPU or degraded NVLink/InfiniBand NIC fails the run instead of passing
+a loose floor.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `RUN_GPU_HEALTH` / `RUN_NCCL` / `RUN_LLM_SMOKETEST` / `RUN_STORAGE` | `true` | Enable/disable a check |
+| `RUN_GPU_HEALTH` / `RUN_GPU_COMPUTE` / `RUN_NCCL` / `RUN_LLM_SMOKETEST` / `RUN_STORAGE` | `true` | Enable/disable a check |
 | `EXPECTED_GPU_COUNT` | unset | Fail if detected GPU count differs |
-| `MAX_GPU_TEMP_C` | `85` | Max acceptable GPU temperature |
+| `MAX_GPU_TEMP_C` | `85` | Max acceptable GPU temperature (idle in `gpu_health`, under load in `gpu_compute`) |
+| `GPU_COMPUTE_SECONDS` | `30` | Duration of the bf16 GEMM burn |
+| `GPU_MIN_TFLOPS` | unset | Optional absolute per-GPU bf16 GEMM floor |
+| `GPU_MIN_REL_TO_MEDIAN` | `0.9` | Per-GPU floor relative to the node's median GEMM throughput |
+| `NCCL_MULTINODE_MIN_BUSBW_GBPS` | `300` | Cross-node minimum avg bus bandwidth |
+| `IB_EXPECTED_PORTS` / `IB_MIN_RATE_GBPS` | `GPUS_PER_NODE` / `400` | Cross-node pre-flight: `ACTIVE` InfiniBand ports per node and their minimum rate |
 | `NCCL_BENCH_ARGS` | `-b 512M -e 8G -f 2 -g <local GPU count>` | Args passed to `all_reduce_perf` |
 | `NCCL_MIN_BUSBW_GBPS` | `100` | Minimum acceptable avg bus bandwidth |
 | `LLM_SMOKETEST_MODEL_PATH` | `/opt/validate/qwen3-0.6b` | Path to the baked-in Qwen3-0.6B checkpoint |
@@ -203,47 +210,57 @@ to Object Storage (see above).
 ## Results (last validated run)
 
 Ran on the live cluster (2 nodes x 8 H100 SXM, InfiniBand, 2 TiB shared
-filesystem, a 2 TiB network disk per validator pod): the per-node Job on
-2026-09-29 with image `v4`, the cross-node Job on 2026-09-30 with `v5`.
-All checks passed on both nodes. Re-running both Jobs with the current `v7`
-on 2026-09-30 passed again with the same numbers within a few percent
-(NVLink 467.8/465.8 GB/s, cross-node 451.9 GB/s). Each pod uploads its `summary.json` to
+filesystem, a 2 TiB network disk per validator pod), both Jobs on
+2026-09-30 with image `v9` and the acceptance thresholds above. All checks
+passed on both nodes. Each pod uploads its `summary.json` to
 `s3://ml-infra-poc-logs/cluster-validator/<pod-hostname>/<timestamp>/`.
 
 **Per node** ([`k8s/job-validate.yaml`](k8s/job-validate.yaml)):
 
 | Check | Node `computeinstance-e00qyx0nfcpnbgnk4z` | Node `computeinstance-e00gdss5xpj5gbybcs` |
 |---|---|---|
-| GPU health | 8 GPUs, max 26°C, 0 ECC errors | 8 GPUs, max 34°C, 0 ECC errors |
-| NCCL, 8 GPUs over NVLink (avg bus bandwidth) | 467.9 GB/s | 465.7 GB/s |
+| GPU health (idle) | 8 GPUs, max 26°C, 0 ECC errors, no row remaps | 8 GPUs, max 34°C, 0 ECC errors, no row remaps |
+| GPU compute, bf16 GEMM per GPU (min-max) | 683-707 TFLOP/s | 684-712 TFLOP/s |
+| Max temperature under load, clock slowdown | 60°C, none | 70°C, none |
+| NCCL, 8 GPUs over NVLink (avg bus bandwidth) | 467.8 GB/s | 465.9 GB/s |
 | LLM smoketest (Qwen3-0.6B generate + backward) | pass | pass |
-| Network disk, read / write | 217 / 222 MB/s | 218 / 223 MB/s |
-| Shared filesystem, read / write | 1570 / 1572 MB/s | 1669 / 1673 MB/s |
+| Network disk, read / write | 217 / 222 MB/s | 217 / 222 MB/s |
+| Shared filesystem, read / write | 1410 / 1410 MB/s | 1483 / 1484 MB/s |
 
 **Across nodes** ([`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml)):
-`all_reduce_perf` over all 16 GPUs averages **450.8 GB/s** bus bandwidth
-(threshold 300), with 0 out-of-bounds values:
+16/16 InfiniBand ports `ACTIVE` at 400 Gb/s, and `all_reduce_perf` over all
+16 GPUs averages **451.2 GB/s** bus bandwidth (threshold 400), with 0
+out-of-bounds values:
 
 | Message size | 512 MiB | 1 GiB | 2 GiB | 4 GiB | 8 GiB |
 |---|---|---|---|---|---|
-| Bus bandwidth (out-of-place) | 414.6 GB/s | 446.8 GB/s | 459.5 GB/s | 465.9 GB/s | 459.7 GB/s |
+| Bus bandwidth (out-of-place) | 415.8 GB/s | 445.8 GB/s | 459.1 GB/s | 460.8 GB/s | 466.9 GB/s |
 
 **Reading these:**
 
-- **GPU health**: all 16 H100s visible and healthy, zero ECC errors.
-- **NCCL**: within a node, NVLink averages ~467 GB/s over 512 MiB-8 GiB,
-  well above the 100 GB/s threshold. Across both nodes, all 16 GPUs reach
-  447 GB/s at 1 GiB, within a few percent of NVLink, because NCCL uses all
-  8 InfiniBand NICs per node. This matches the training NCCL sweep's
-  442 GB/s (see [`training/README.md`](../training/README.md#nccl-bandwidth)).
+- **GPU health**: all 16 H100s visible and healthy, zero ECC errors, no
+  pending or failed row remaps.
+- **GPU compute**: every GPU sustains 681-712 TFLOP/s of bf16 GEMM
+  (repeated across runs) while all 8 run at once, within 4% of each other.
+  The GPUs sit at their 700 W power cap, which is normal for a GEMM burn;
+  no thermal or hardware slowdown, and at most 70°C. This is the check that
+  catches one slow or throttling GPU, which would drag down every
+  synchronous training step without showing up in the NCCL numbers.
+- **NCCL**: within a node, NVLink averages ~467 GB/s over 512 MiB-8 GiB.
+  Across both nodes, all 16 GPUs reach 446 GB/s at 1 GiB, within a few
+  percent of NVLink, because NCCL uses all 8 InfiniBand NICs per node. This
+  matches the training NCCL sweep's 442 GB/s (see
+  [`training/README.md`](../training/README.md#nccl-bandwidth)). The 400 GB/s
+  thresholds sit ~10-15% below that, so one degraded link fails the run.
 - **LLM smoketest**: a real Qwen3-0.6B checkpoint (same model family as
   [`training/`](../training/README.md)) generates 20 tokens and completes a
   forward and backward pass on GPU, so the PyTorch/CUDA/Transformers stack
   works end to end, not just `nvidia-smi`.
 - **Storage bench**: the network disk (`compute-csi-default-sc`, a Nebius
-  Network SSD volume) does ~220 MB/s read and write on both nodes. The
-  shared filesystem (`virtiofs`) does ~1.6 GB/s, about 7x faster; the gap
-  comes from the storage backends, not misconfiguration. No
+  Network SSD volume) does ~220 MB/s read and write on both nodes, the same
+  in every run. The shared filesystem (`virtiofs`) does 1.2-1.7 GB/s
+  depending on the run (both pods hit it at the same time), 5-8x faster;
+  the gap comes from the storage backends, not misconfiguration. No
   `FIO_MIN_THROUGHPUT_MBPS` threshold was set, so both just report numbers.
 
 **Live view while a job runs:** the [Grafana dashboard](#grafana-dashboard)

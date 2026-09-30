@@ -13,6 +13,8 @@
 #   NCCL_MULTINODE_ARGS            - all_reduce_perf args (default: "-b 512M -e 8G -f 2 -g 1").
 #   NCCL_MULTINODE_MIN_BUSBW_GBPS  - minimum average bus bandwidth (default: 300).
 #   SSH_KEY_DIR                    - mounted Secret with id_ed25519 / id_ed25519.pub.
+#   IB_EXPECTED_PORTS              - InfiniBand ports expected per node (default: GPUS_PER_NODE).
+#   IB_MIN_RATE_GBPS               - minimum port rate in Gb/s (default: 400).
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/common.sh"
@@ -24,6 +26,8 @@ GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 ARGS="${NCCL_MULTINODE_ARGS:--b 512M -e 8G -f 2 -g 1}"
 MIN_BUSBW="${NCCL_MULTINODE_MIN_BUSBW_GBPS:-300}"
 SSH_KEY_DIR="${SSH_KEY_DIR:-/etc/ssh-key}"
+IB_EXPECTED_PORTS="${IB_EXPECTED_PORTS:-$GPUS_PER_NODE}"
+IB_MIN_RATE_GBPS="${IB_MIN_RATE_GBPS:-400}"
 DONE_FILE=/tmp/nccl_multinode.done
 
 # NCCL registers GPU memory with the IB NICs; the default 8 MB memlock limit
@@ -56,21 +60,57 @@ HOSTS=()
 for i in $(seq 0 $((NNODES - 1))); do
     HOSTS+=("${PEER_HOST_PATTERN//\{i\}/$i}")
 done
+# Resolve each peer once, as soon as its sshd answers, and use the IP from
+# then on. CoreDNS (2 replicas, `cache 30`) can keep serving a cached
+# NXDOMAIN from before the pod existed, so a name that just resolved can
+# fail again on the next lookup.
+TARGETS=("$(hostname -i | awk '{print $1}')")
 for host in "${HOSTS[@]:1}"; do
     log "Waiting for sshd on $host"
+    ip=""
     for _ in $(seq 1 120); do
-        ssh -o ConnectTimeout=5 "$host" true 2>/dev/null && break
+        ip=$(getent hosts "$host" | awk '{print $1; exit}')
+        [[ -n "$ip" ]] && ssh -o ConnectTimeout=5 "$ip" true 2>/dev/null && break
+        ip=""
         sleep 5
     done
+    if [[ -z "$ip" ]]; then
+        write_result "$NAME" "fail" "sshd on $host never became reachable" '{}'
+        log "RESULT: ONE OR MORE CHECKS FAILED"
+        exit 1
+    fi
+    log "$host is $ip"
+    TARGETS+=("$ip")
 done
 
-HOSTLIST=$(printf '%s:'"$GPUS_PER_NODE"',' "${HOSTS[@]}")
+FAIL_REASONS=()
+
+# Pre-flight: every node should have IB_EXPECTED_PORTS InfiniBand ports that
+# are ACTIVE at >= IB_MIN_RATE_GBPS. A down or downgraded NIC otherwise only
+# shows up as a vague bandwidth drop.
+IB_PORTS_CMD='for d in /sys/class/infiniband/*; do [ -e "$d/ports/1/state" ] && echo "$(basename "$d") $(cut -d" " -f2 "$d/ports/1/state") $(cut -d" " -f1 "$d/ports/1/rate")"; done'
+IB_ACTIVE_TOTAL=0
+for i in "${!HOSTS[@]}"; do
+    host="${HOSTS[$i]}"
+    if (( i == 0 )); then
+        PORTS=$(bash -c "$IB_PORTS_CMD")
+    else
+        PORTS=$(ssh "${TARGETS[$i]}" "$IB_PORTS_CMD")
+    fi
+    ACTIVE=$(echo "$PORTS" | awk -v min="$IB_MIN_RATE_GBPS" '$2 == "ACTIVE" && $3 >= min' | grep -c . || true)
+    (( IB_ACTIVE_TOTAL += ACTIVE ))
+    log "[$NAME] $host: $ACTIVE/$IB_EXPECTED_PORTS IB ports ACTIVE at >= ${IB_MIN_RATE_GBPS} Gb/s"
+    if (( ACTIVE < IB_EXPECTED_PORTS )); then
+        FAIL_REASONS+=("$host: only $ACTIVE/$IB_EXPECTED_PORTS IB ports ACTIVE at >= ${IB_MIN_RATE_GBPS} Gb/s ($(echo "$PORTS" | tr '\n' ' '))")
+    fi
+done
+
+HOSTLIST=$(printf '%s:'"$GPUS_PER_NODE"',' "${TARGETS[@]}")
 NP=$((NNODES * GPUS_PER_NODE))
 BIN="$(command -v all_reduce_perf 2>/dev/null)"
 # MPI only bootstraps the processes (over TCP on eth0); NCCL moves the data over IB.
-# Keep the full pod DNS names: the short ones don't resolve across pods.
 CMD=(mpirun --allow-run-as-root -np "$NP" -H "${HOSTLIST%,}" --bind-to none
-     -mca orte_keep_fqdn_hostnames 1 -mca pml ob1 -mca btl tcp,self -mca btl_tcp_if_include eth0 -mca coll ^hcoll
+     -mca pml ob1 -mca btl tcp,self -mca btl_tcp_if_include eth0 -mca coll ^hcoll
      -x PATH -x LD_LIBRARY_PATH -x NCCL_IB_HCA=mlx5 -x NCCL_SOCKET_IFNAME=eth0
      -x NCCL_DEBUG=WARN "$BIN" $ARGS)
 
@@ -78,14 +118,13 @@ log "Running: ${CMD[*]}"
 OUTPUT=$("${CMD[@]}" 2>&1)
 RC=$?
 echo "$OUTPUT"
-for host in "${HOSTS[@]:1}"; do
-    ssh "$host" touch "$DONE_FILE" || true
+for target in "${TARGETS[@]:1}"; do
+    ssh "$target" touch "$DONE_FILE" || true
 done
 
 OOB="$(echo "$OUTPUT" | grep -oP 'Out of bounds values\s*:\s*\K[0-9]+' | tail -n1)"
 AVG_BUSBW="$(echo "$OUTPUT" | grep -oP 'Avg bus bandwidth\s*:\s*\K[0-9.]+' | tail -n1)"
 
-FAIL_REASONS=()
 [[ "$RC" -ne 0 ]] && FAIL_REASONS+=("mpirun exited with code $RC")
 [[ -z "$AVG_BUSBW" ]] && FAIL_REASONS+=("could not parse average bus bandwidth from output")
 [[ -n "$OOB" && "$OOB" -ne 0 ]] && FAIL_REASONS+=("$OOB out-of-bounds values detected (data corruption)")
@@ -96,9 +135,10 @@ fi
 METRICS=$(jq -n \
     --argjson nnodes "$NNODES" \
     --argjson gpu_count "$NP" \
+    --argjson ib_active_ports "$IB_ACTIVE_TOTAL" \
     --arg avg_busbw_gbps "${AVG_BUSBW:-null}" \
     --arg out_of_bounds "${OOB:-null}" \
-    '{nnodes: $nnodes, gpu_count: $gpu_count, avg_busbw_gbps: ($avg_busbw_gbps | tonumber? // null), out_of_bounds: ($out_of_bounds | tonumber? // null)}')
+    '{nnodes: $nnodes, gpu_count: $gpu_count, ib_active_ports: $ib_active_ports, avg_busbw_gbps: ($avg_busbw_gbps | tonumber? // null), out_of_bounds: ($out_of_bounds | tonumber? // null)}')
 
 if [[ ${#FAIL_REASONS[@]} -eq 0 ]]; then
     write_result "$NAME" "pass" "avg bus bandwidth ${AVG_BUSBW} GB/s across ${NP} GPU(s) on ${NNODES} nodes" "$METRICS"

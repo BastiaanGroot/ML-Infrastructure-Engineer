@@ -52,7 +52,7 @@ or the Nebius CLI instead, as noted in each step.
 
 ## Cluster Validator
 
-[`cluster-validator/`](cluster-validator/) is a lightweight, portable container that checks every node's GPU health, NVLink bandwidth, PyTorch/LLM stack and storage throughput, plus NCCL bandwidth across both nodes over InfiniBand, before running training jobs on the cluster. See its [README](cluster-validator/README.md) for build, push, run instructions and results.
+[`cluster-validator/`](cluster-validator/) is a lightweight, portable container that checks every node's GPU health, per-GPU compute throughput, NVLink bandwidth, PyTorch/LLM stack and storage throughput, plus NCCL bandwidth across both nodes over InfiniBand, before running training jobs on the cluster. See its [README](cluster-validator/README.md) for build, push, run instructions and results.
 
 ## Training (Option 1)
 
@@ -75,7 +75,7 @@ Choices made for the [take-home exercise](docs/ML-Infrastructure-Engineer.md), i
 
 - **Option 1 (training).** The customer's first goal is training their own LLM, and the 512-H100 reservation is sized for it. Option 2 (inference) is out of scope for this PoC.
 - Scheduler — **plain Kubernetes** (Nebius mk8s): multi-node jobs are Indexed Jobs running `torchrun` (training) or `mpirun` over SSH (the cross-node validator), with no Slurm, training operator or MPI Operator on top.
-- Storage — both 2TB volumes are in use and benchmarked (see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run)). The **network disk** (PVC, `compute-csi-default-sc`) is per-job scratch: the raw dataset download, and each validator pod's storage test. The **shared filesystem** (`virtiofs`, mounted on every GPU node, ~7x faster in `fio`) holds what every node reads or writes: the tokenized dataset, the HF cache and the training checkpoints.
+- Storage — both 2TB volumes are in use and benchmarked (see [cluster-validator/README.md#results-last-validated-run](cluster-validator/README.md#results-last-validated-run)). The **network disk** (PVC, `compute-csi-default-sc`) is per-job scratch: the raw dataset download, and each validator pod's storage test. The **shared filesystem** (`virtiofs`, mounted on every GPU node, 5-8x faster in `fio`) holds what every node reads or writes: the tokenized dataset, the HF cache and the training checkpoints.
 - Benchmark methodology — not running the actual **MLPerf** suite itself (its fixed reference models/datasets and submission/compliance process are a mismatch for a "lightweight, portable" validator and this exercise's scope), but using its metric *definitions* (throughput per accelerator, time-to-train) as the reference vocabulary for the distribution-strategy comparisons, so efficiency numbers are explainable in industry-standard terms on demo day.
 - Metrics/observability stack — **Nebius-hosted** (Metrics/Logs/Traces): native Monitoring (PromQL) + Logging (LogQL), fed by the Nebius Observability Agent for Kubernetes, visualized in Grafana. See [docs/observability.md](docs/observability.md).
 - Run logs (e.g. `summary.json`) — optionally uploaded to a Nebius **Object Storage** bucket (`ml-infra-poc-logs`) for retention past Logging's 14-day default; see [cluster-validator/README.md](cluster-validator/README.md#uploading-logs-to-object-storage).

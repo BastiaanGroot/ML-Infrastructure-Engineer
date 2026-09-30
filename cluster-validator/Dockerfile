@@ -2,7 +2,8 @@
 #
 # Built on top of Nebius's own public NCCL benchmark image (already has
 # CUDA, NCCL, nccl-tests, and the Mellanox OFED userspace components) — we
-# add a thin validation layer: GPU health (nvidia-smi), NCCL/interconnect
+# add a thin validation layer: GPU health (nvidia-smi), per-GPU bf16 GEMM
+# throughput under load (PyTorch), NCCL/interconnect
 # bandwidth (nccl-tests), an LLM smoketest (PyTorch + Transformers, a real
 # minimal Qwen3-0.6B checkpoint - see scripts/llm_smoketest.*), and storage
 # throughput (fio). See cluster-validator/README.md for the full rationale,
@@ -36,6 +37,6 @@ AutoTokenizer.from_pretrained(m).save_pretrained('/opt/validate/qwen3-0.6b')"
 # The base image builds nccl-tests here but doesn't put it on PATH.
 ENV PATH=/opt/nccl-tests/build:$PATH
 COPY scripts/ /opt/validate/
-RUN chmod +x /opt/validate/*.sh
+RUN chmod +x /opt/validate/*.sh /opt/validate/*.py
 
 ENTRYPOINT ["/opt/validate/run.sh"]
