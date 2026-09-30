@@ -46,8 +46,11 @@ browsable in the [dashboard](../dashboard/README.md).
 kubectl create secret generic mlflow-creds \
   --from-literal=MLFLOW_TRACKING_USERNAME=admin \
   --from-file=MLFLOW_TRACKING_PASSWORD=<(nebius mysterybox payload get-by-key \
-      --secret-id mbsec-e00c36r6fzh80jfkc5 --key password --format json \
+      --secret-id "$(terraform -chdir=../infra output -raw mlflow_password_secret_id)" --key password --format json \
       | grep -v "token from" | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["string_value"],end="")')
+
+# Optional: point launch.py at another MLflow (defaults to this PoC's endpoint)
+export MLFLOW_TRACKING_URI=https://$(terraform -chdir=../infra output -raw mlflow_tracking_endpoint)
 
 ./launch.py --list                      # all experiment names
 ./launch.py q8b-baseline

@@ -17,7 +17,10 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MLFLOW_TRACKING_URI = "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud"
+MLFLOW_TRACKING_URI = os.environ.get(
+    "MLFLOW_TRACKING_URI",
+    "https://public-tracking-e00-qq5esxe7w0zwk32-tyaqmja4khghyam-mlflow.gw.msp.eu-north1.nebius.cloud",
+)
 
 Q1P7B = "--model qwen3-1p7b --approx-num-params 1.7e9 --micro-batch-size 2 --global-batch-size 32"
 Q8B = "--model qwen3-8b --approx-num-params 8.2e9 --micro-batch-size 1 --global-batch-size 64"

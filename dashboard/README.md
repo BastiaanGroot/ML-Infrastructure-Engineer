@@ -33,8 +33,8 @@ ssh <user>@<ip> 'sudo git -C /opt/dashboard/repo pull && sudo systemctl restart 
 ```bash
 python3 -m venv dashboard/.venv
 dashboard/.venv/bin/pip install -r dashboard/requirements.txt
-export MLFLOW_TRACKING_URI=https://<tracking-endpoint> MLFLOW_TRACKING_USERNAME=admin
-nebius mysterybox payload get-by-key --secret-id mbsec-e00c36r6fzh80jfkc5 \
+export MLFLOW_TRACKING_URI=https://$(terraform -chdir=infra output -raw mlflow_tracking_endpoint) MLFLOW_TRACKING_USERNAME=admin
+nebius mysterybox payload get-by-key --secret-id "$(terraform -chdir=infra output -raw mlflow_password_secret_id)" \
   --key password --format json > /tmp/pw.json   # file first: CLI may print a "token from" line
 export MLFLOW_TRACKING_PASSWORD=$(python3 -c 'import json; t=open("/tmp/pw.json").read(); print(json.loads(t[t.index("{"):])["data"]["string_value"])')
 rm /tmp/pw.json

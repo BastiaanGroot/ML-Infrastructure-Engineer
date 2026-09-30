@@ -6,7 +6,6 @@ variable "project_id" {
 variable "tenant_id" {
   description = "Nebius tenant ID that owns the project (its \"editors\" group is looked up for mlflow-sa)."
   type        = string
-  default     = "tenant-e00txje2rqact2jtfd"
 }
 
 variable "region" {
@@ -96,13 +95,11 @@ variable "node_group_security_group_ids" {
 }
 
 # Nebius-managed MLflow (msp mlflow), for tracking Option 1's training
-# efficiency across distribution-strategy experiments. Off by default since
-# it's a real, ongoing-cost managed service (compute + managed Postgres +
-# storage) — flip enable_mlflow to true (and `terraform apply`) when Option 1
-# work actually starts. This also creates MLflow's service account
-# ("mlflow-sa") and adds it to the tenant's "editors" group.
+# efficiency across distribution-strategy experiments. This also creates
+# MLflow's service account ("mlflow-sa") and adds it to the tenant's
+# "editors" group.
 variable "enable_mlflow" {
-  description = "Whether to create the Nebius-managed MLflow cluster. Off by default (real ongoing cost) — see infra/README.md."
+  description = "Whether to create the Nebius-managed MLflow cluster (and its password secret) — see infra/README.md."
   type        = bool
   default     = false
 }

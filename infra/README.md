@@ -2,57 +2,43 @@
 
 Terraform to reproduce the PoC infrastructure from scratch in a Nebius
 project: VPC network + subnet, an mk8s cluster, one GPU node group in an
-InfiniBand GPU cluster, a
-container registry for `cluster-validator` (and other) images, and an Object
-Storage bucket for run logs (`summary.json` etc. — see
-[`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)).
-
-This is meant for standing up a **fresh** environment (e.g. so the client can
-recreate the setup themselves). The hand-built PoC cluster has since been
-`terraform import`-ed into local state for verification (state stays
-local/gitignored, never committed) — see `misc/project-status.md` for
-details. Extend it here as the project grows (storage, training/inference
-workloads, observability agent via the `helm`/`kubernetes` Terraform
-providers, etc.).
+InfiniBand GPU cluster, a shared filesystem, a container registry for
+`cluster-validator` (and other) images, an Object Storage bucket for run logs
+(`summary.json` etc. — see
+[`cluster-validator/README.md`](../cluster-validator/README.md#uploading-logs-to-object-storage)),
+the managed [MLflow](#mlflow-for-option-1-experiment-tracking) tracking
+server and the [dashboard VM](#dashboard-vm). State stays local (gitignored,
+never committed).
 
 ## Usage
 
-1. [Install and initialize the Nebius Terraform provider](https://docs.nebius.com/terraform-provider/install)
-   (service account or user token auth).
-2. From this directory:
+1. [Install the Nebius Terraform provider](https://docs.nebius.com/terraform-provider/install).
+2. Copy [`terraform.tfvars.example`](terraform.tfvars.example) to
+   `terraform.tfvars` (gitignored) and set `project_id` and `tenant_id`. The
+   optional settings there (GPU node SSH access, extra security group) are
+   environment-specific, not secrets (an SSH key here is a *public* key).
+3. From this directory:
    ```bash
    terraform init
-   terraform plan -var="project_id=<your_project_id>"
-   terraform apply -var="project_id=<your_project_id>"
+   terraform plan
+   terraform apply
    ```
-3. See [`variables.tf`](variables.tf) for other overridable settings (region,
+4. See [`variables.tf`](variables.tf) for other overridable settings (region,
    GPU platform/preset/fabric, node count). Defaults are 2x 8x H100
    (`gpu-h100-sxm`, `8gpu-128vcpu-1600gb`) in a GPU cluster on `fabric-4` —
    see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband)
    section for why, and how pods get InfiniBand access.
-4. Optional GPU node SSH access / shared filesystem mount / extra security
-   group — not secrets (an SSH key here is a *public* key), but
-   environment-specific, so unset by default. Copy
-   [`terraform.tfvars.example`](terraform.tfvars.example) to `terraform.tfvars`
-   (gitignored) and fill in to enable them.
 
 Always run `terraform plan` and review the diff before `apply`, especially
 against a project that already has resources.
 
 ## MLflow (for Option 1 experiment tracking)
 
-A Nebius-managed MLflow cluster (`nebius_msp_mlflow_v1alpha1_cluster`) is
-**created and running** (`enable_mlflow = true`), for use as the experiment
-tracking backend for Option 1's distribution-strategy runs. MLflow reaches
-its Object Storage bucket through the `mlflow-sa` service account, which
-Terraform creates alongside the cluster and adds to the tenant's `editors`
-group (`tenant_id` variable). In this project the SA and its membership were
-created by hand first, then brought under Terraform with:
-
-```bash
-terraform import -var=enable_mlflow=true 'nebius_iam_v1_service_account.mlflow[0]' <serviceaccount-id>
-terraform import -var=enable_mlflow=true 'nebius_iam_v1_group_membership.mlflow_editors[0]' <groupmembership-id>
-```
+A Nebius-managed MLflow cluster (`nebius_msp_mlflow_v1alpha1_cluster`,
+gated by `enable_mlflow`) is the experiment tracking backend for Option 1's
+distribution-strategy runs. MLflow reaches its Object Storage bucket through
+the `mlflow-sa` service account, which Terraform creates alongside the
+cluster and adds to the tenant's `editors` group (`tenant_id` variable).
 
 - Tracking endpoint (public — `public_access = true`; still gated by
   HTTP basic auth below, no anonymous access):
