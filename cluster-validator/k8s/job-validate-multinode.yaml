@@ -32,6 +32,7 @@ spec:
   parallelism: 2
   completionMode: Indexed
   backoffLimit: 0
+  activeDeadlineSeconds: 1800 # workers wait for the launcher; don't let them hang
   template:
     metadata:
       labels:
@@ -62,7 +63,7 @@ spec:
             sizeLimit: 16Gi
       containers:
         - name: cluster-validator
-          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
+          image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
           command: ["/opt/validate/nccl_multinode.sh"]
           securityContext:
             privileged: true

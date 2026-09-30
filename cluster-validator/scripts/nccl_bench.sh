@@ -16,7 +16,7 @@ source "$DIR/common.sh"
 NAME="nccl_bench"
 NCCL_MIN_BUSBW_GBPS="${NCCL_MIN_BUSBW_GBPS:-100}"
 
-BIN="$(command -v all_reduce_perf 2>/dev/null || find / -maxdepth 6 -type f -name all_reduce_perf 2>/dev/null | head -n1)"
+BIN="$(command -v all_reduce_perf 2>/dev/null)"
 if [[ -z "$BIN" ]]; then
     write_result "$NAME" "fail" "all_reduce_perf binary not found in image" '{}'
     exit 1

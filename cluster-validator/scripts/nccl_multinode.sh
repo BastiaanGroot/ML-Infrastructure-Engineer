@@ -66,7 +66,7 @@ done
 
 HOSTLIST=$(printf '%s:'"$GPUS_PER_NODE"',' "${HOSTS[@]}")
 NP=$((NNODES * GPUS_PER_NODE))
-BIN="$(command -v all_reduce_perf 2>/dev/null || find / -maxdepth 6 -type f -name all_reduce_perf 2>/dev/null | head -n1)"
+BIN="$(command -v all_reduce_perf 2>/dev/null)"
 # MPI only bootstraps the processes (over TCP on eth0); NCCL moves the data over IB.
 # Keep the full pod DNS names: the short ones don't resolve across pods.
 CMD=(mpirun --allow-run-as-root -np "$NP" -H "${HOSTLIST%,}" --bind-to none

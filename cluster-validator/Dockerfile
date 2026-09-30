@@ -33,6 +33,8 @@ m = 'Qwen/Qwen3-0.6B'; \
 AutoModelForCausalLM.from_pretrained(m).save_pretrained('/opt/validate/qwen3-0.6b'); \
 AutoTokenizer.from_pretrained(m).save_pretrained('/opt/validate/qwen3-0.6b')"
 
+# The base image builds nccl-tests here but doesn't put it on PATH.
+ENV PATH=/opt/nccl-tests/build:$PATH
 COPY scripts/ /opt/validate/
 RUN chmod +x /opt/validate/*.sh
 

@@ -20,14 +20,14 @@ trade-off.
 ## Build & push
 
 ```bash
-docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5 .
+docker build --platform linux/amd64 -t cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7 .
 nebius registry configure-helper
-docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
+docker push cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
 ```
 
 Bump the tag on every change and update it in
 [`k8s/job-validate.yaml`](k8s/job-validate.yaml) and
-[`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml) to match (currently `v5`).
+[`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml) to match (currently `v7`).
 
 Image lives in the `cluster-validator` registry (`registry-e00qprtt5j85j3syw7`) in the
 `ml-infra-poc` project. The registry path in the image tag is the registry ID
@@ -40,7 +40,7 @@ nodes are x86_64 (relevant when building from an Apple Silicon Mac).
 docker run --rm --gpus all \
   -v /mnt/network-disk:/mnt/network-disk \
   -v /mnt/shared-fs:/mnt/shared-fs \
-  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v5
+  cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v7
 ```
 
 ## Run on the cluster
@@ -162,7 +162,7 @@ same `--secret-id` — no need to regenerate the access key or ever see the
 plaintext value outside that one command substitution.
 
 The upload is best-effort: a failure logs a warning but doesn't change the
-overall validation exit code (see `upload_logs.py`/`upload_logs.sh`).
+overall validation exit code (see `upload_logs.py`).
 
 ## Grafana dashboard
 
@@ -199,9 +199,10 @@ to Object Storage (see above).
 
 Ran on the live cluster (2 nodes x 8 H100 SXM, InfiniBand, 2 TiB shared
 filesystem, a 2 TiB network disk per validator pod): the per-node Job on
-2026-09-29 with image `v4`, the cross-node Job on 2026-09-30 with `v5`
-(which only changes `nccl_multinode.sh`). All checks passed
-on both nodes. Each pod uploads its `summary.json` to
+2026-09-29 with image `v4`, the cross-node Job on 2026-09-30 with `v5`.
+All checks passed on both nodes. Re-running both Jobs with the current `v7`
+on 2026-09-30 passed again with the same numbers within a few percent
+(NVLink 467.8/465.8 GB/s, cross-node 451.9 GB/s). Each pod uploads its `summary.json` to
 `s3://ml-infra-poc-logs/cluster-validator/<pod-hostname>/<timestamp>/`.
 
 **Per node** ([`k8s/job-validate.yaml`](k8s/job-validate.yaml)):

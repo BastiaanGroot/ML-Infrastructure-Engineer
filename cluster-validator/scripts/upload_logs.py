@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Uploads the cluster-validator summary.json to Nebius Object Storage
 (S3-compatible), if UPLOAD_LOGS_BUCKET is set. Called from run.sh at the end
-of a run. Deliberately non-fatal on failure - see upload_logs.sh, which logs
-a warning but doesn't change the overall validation exit code.
+of a run. Deliberately non-fatal on failure: run.sh logs a warning but
+doesn't change the overall validation exit code.
 
 Env vars:
   UPLOAD_LOGS_BUCKET    - target bucket name (required; if unset, run.sh never calls this).

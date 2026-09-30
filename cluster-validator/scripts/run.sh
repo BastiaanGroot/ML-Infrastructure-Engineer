@@ -42,7 +42,7 @@ echo "$SUMMARY" > "$RESULTS_DIR/summary.json"
 log "Full summary written to $RESULTS_DIR/summary.json"
 
 if [[ -n "${UPLOAD_LOGS_BUCKET:-}" ]]; then
-    "$DIR/upload_logs.sh" || log "WARNING: log upload to object storage failed (non-fatal)"
+    python3 "$DIR/upload_logs.py" || log "WARNING: log upload to object storage failed (non-fatal)"
 fi
 
 if [[ "$OVERALL_STATUS" -eq 0 ]]; then
