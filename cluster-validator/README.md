@@ -90,7 +90,12 @@ kubectl create secret docker-registry nebius-registry \
 
 ## Configuration
 
-All checks are controlled via environment variables (see comments at the top of each script in `scripts/`):
+All checks are controlled via environment variables (see comments at the top of each script in `scripts/`).
+The script defaults are deliberately generic; the Job YAMLs set acceptance
+thresholds for this cluster's 8x H100 nodes at ~85-90% of the measured
+bandwidth (`EXPECTED_GPU_COUNT=8`, `NCCL_MIN_BUSBW_GBPS=400`,
+`NCCL_MULTINODE_MIN_BUSBW_GBPS=400`), so a single degraded NVLink or
+InfiniBand NIC fails the run instead of passing a loose floor.
 
 | Variable | Default | Purpose |
 |---|---|---|

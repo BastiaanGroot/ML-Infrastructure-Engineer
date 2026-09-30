@@ -34,7 +34,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       # Requires a `nebius-registry` imagePullSecret if the node group's
       # service account lacks Container Registry viewer access — see
-      # cluster-validator/README.md "Pulling the image" section.
+      # cluster-validator/README.md "Run on the cluster".
       imagePullSecrets:
         - name: nebius-registry
       containers:
@@ -48,6 +48,13 @@ spec:
                 name: cluster-validator-logs-creds
                 optional: true
           env:
+            # Acceptance thresholds for 8x H100 SXM nodes: all 8 GPUs visible,
+            # and NVLink all_reduce at ~85% of the ~467 GB/s measured here,
+            # so one degraded NVLink fails instead of passing the generic 100.
+            - name: EXPECTED_GPU_COUNT
+              value: "8"
+            - name: NCCL_MIN_BUSBW_GBPS
+              value: "400"
             - name: STORAGE_PATHS
               value: "/mnt/network-disk,/mnt/shared-fs"
             - name: UPLOAD_LOGS_BUCKET

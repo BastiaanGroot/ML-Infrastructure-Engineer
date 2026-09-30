@@ -74,6 +74,10 @@ spec:
               value: "8"
             - name: PEER_HOST_PATTERN
               value: "cluster-validator-multinode-{i}.cluster-validator-multinode.default.svc.cluster.local"
+            # ~90% of the ~451 GB/s measured over 16 GPUs: losing one of the
+            # 8 NICs per node drops to ~7/8 and fails instead of passing 300.
+            - name: NCCL_MULTINODE_MIN_BUSBW_GBPS
+              value: "400"
           resources:
             limits:
               nvidia.com/gpu: 8
