@@ -110,8 +110,6 @@ def main() -> None:
                 }
             )
             if mlflow_run is not None:
-                import mlflow
-
                 mlflow.log_metric("algbw_gbps", algbw_gbps, step=size_mb)
                 mlflow.log_metric("busbw_gbps", busbw_gbps, step=size_mb)
                 mlflow.log_metric("avg_time_ms", avg_time_sec * 1e3, step=size_mb)
@@ -121,8 +119,6 @@ def main() -> None:
             json.dump(results, f, indent=2)
 
     if mlflow_run is not None:
-        import mlflow
-
         mlflow.end_run()
 
     dist.destroy_process_group()

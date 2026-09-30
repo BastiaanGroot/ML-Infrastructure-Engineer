@@ -110,13 +110,13 @@ H100_BF16_PEAK_FLOPS_PER_GPU = 989e12
 H100_FP8_PEAK_FLOPS_PER_GPU = 1979e12
 CLUSTER_TAGS = {"cluster": "2x8-h100-ib", "gpu": "H100"}
 
-# module path, HF id, is_moe (whether the recipe's pretrain_config() accepts
+# module path, is_moe (whether the recipe's pretrain_config() accepts
 # expert_parallelism - true only for the qwen3_*_a3b sparse/MoE recipes).
 MODEL_RECIPES = {
-    "qwen3-1p7b": ("megatron.bridge.recipes.qwen.qwen3_1p7b", "Qwen/Qwen3-1.7B", False),
-    "qwen3-8b": ("megatron.bridge.recipes.qwen.qwen3_8b", "Qwen/Qwen3-8B", False),
-    "qwen3-32b": ("megatron.bridge.recipes.qwen.qwen3_32b", "Qwen/Qwen3-32B", False),
-    "qwen3-30b-a3b": ("megatron.bridge.recipes.qwen.qwen3_30b_a3b", "Qwen/Qwen3-30B-A3B", True),
+    "qwen3-1p7b": ("megatron.bridge.recipes.qwen.qwen3_1p7b", False),
+    "qwen3-8b": ("megatron.bridge.recipes.qwen.qwen3_8b", False),
+    "qwen3-32b": ("megatron.bridge.recipes.qwen.qwen3_32b", False),
+    "qwen3-30b-a3b": ("megatron.bridge.recipes.qwen.qwen3_30b_a3b", True),
 }
 
 
@@ -196,7 +196,7 @@ def run_params(args: argparse.Namespace, world_size: int) -> dict:
         "tensor_parallelism": args.tensor_parallelism,
         "pipeline_parallelism": args.pipeline_parallelism,
         "context_parallelism": args.context_parallelism,
-        "expert_parallelism": args.expert_parallelism if MODEL_RECIPES[args.model][2] else 1,
+        "expert_parallelism": args.expert_parallelism if MODEL_RECIPES[args.model][1] else 1,
         "data_parallelism": world_size
         // (args.tensor_parallelism * args.pipeline_parallelism * args.context_parallelism),
         "world_size": world_size,
@@ -245,7 +245,7 @@ def log_live_summary(mlflow, args: argparse.Namespace, iters: list, world_size: 
 
 def main() -> None:
     args = parse_args()
-    module_name, _hf_model_id, is_moe = MODEL_RECIPES[args.model]
+    module_name, is_moe = MODEL_RECIPES[args.model]
     recipes = __import__(module_name, fromlist=["pretrain_config"])
 
     recipe_kwargs = dict(
