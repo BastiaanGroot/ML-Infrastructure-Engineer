@@ -1,0 +1,8 @@
+---
+description: Project instructions, shared with Claude Code
+alwaysApply: true
+---
+
+Follow @CLAUDE.md — the single source of truth for this repo's conventions
+(cost policy, commit/push rules) and Nebius operational gotchas. Edit that
+file, not this one, so Cursor and Claude Code stay in sync.
