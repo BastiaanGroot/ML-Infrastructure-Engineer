@@ -201,7 +201,16 @@ def communication_tab(runs: pd.DataFrame) -> None:
         )
 
 
-def planner_tab() -> None:
+def measured(runs: pd.DataFrame, run_name: str) -> tuple[float | None, float | None]:
+    """Latest finished experiment run's steady step time and peak memory."""
+    match = runs[(runs["run_name"] == run_name) & (runs["run_kind"] == "experiment")]
+    if match.empty or pd.isna(match.iloc[-1].get("metrics.steady_step_time_sec")):
+        return None, None
+    last = match.iloc[-1]
+    return last["metrics.steady_step_time_sec"], last["metrics.peak_gpu_memory_gb"]
+
+
+def planner_tab(runs: pd.DataFrame) -> None:
     st.caption(
         "First-order estimate for dense models: Megatron distributed optimizer, "
         "1F1B pipeline, flash attention + sequence parallelism. Communication "
@@ -268,19 +277,21 @@ def planner_tab() -> None:
         models = {m.name: m for m in rec.PRESET_MODELS}
         workload = rec.Workload(4096, 1, 64, 0.45)
         checks = [
-            ("q8b-baseline", "Qwen3-8B", 2, 1, 1.94, 49.2),
-            ("q8b-dp16 (OOM)", "Qwen3-8B", 1, 1, None, None),
-            ("q8b-pp2", "Qwen3-8B", 2, 2, 2.29, 33.2),
-            ("q8b-tp4-dp4", "Qwen3-8B", 4, 1, 2.60, 30.2),
-            ("q8b-tp8-dp2", "Qwen3-8B", 8, 1, 5.06, 20.7),
-            ("q32b-tp4-pp2-dp2", "Qwen3-32B", 4, 2, 10.69, 52.8),
-            ("q32b-tp8-pp2-dp1", "Qwen3-32B", 8, 2, 14.79, 40.2),
+            ("q8b-baseline", "Qwen3-8B", 2, 1),
+            ("q8b-dp16", "Qwen3-8B", 1, 1),  # OOMs, so no measured values
+            ("q8b-pp2", "Qwen3-8B", 2, 2),
+            ("q8b-tp4-dp4", "Qwen3-8B", 4, 1),
+            ("q8b-tp8-dp2", "Qwen3-8B", 8, 1),
+            ("q32b-tp4-pp2-dp2", "Qwen3-32B", 4, 2),
+            ("q32b-tp8-pp2-dp1", "Qwen3-32B", 8, 2),
         ]
         rows = []
-        for run, model_name, tp, pp, step, mem in checks:
+        for run, model_name, tp, pp in checks:
             p = rec.plan(models[model_name], poc, workload, tp, pp)
+            step, mem = measured(runs, run)
             rows.append({
-                "run": run, "layout": p.label, "measured step (s)": step, "predicted step (s)": p.step_s,
+                "run": run if step is not None else f"{run} (no result: OOM or not run)",
+                "layout": p.label, "measured step (s)": step, "predicted step (s)": p.step_s,
                 "measured memory (GB)": mem, "predicted memory (GB)": p.memory_gb,
             })
         st.dataframe(pd.DataFrame(rows).style.format(precision=2), hide_index=True, width="stretch")
@@ -311,4 +322,4 @@ with tab1:
 with tab2:
     communication_tab(runs)
 with tab3:
-    planner_tab()
+    planner_tab(runs)
