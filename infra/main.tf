@@ -2,20 +2,10 @@
 # network + subnet, an mk8s cluster, one GPU node group, a shared filesystem,
 # a container registry, and an Object Storage bucket for logs.
 #
-# The hand-built PoC cluster (created via the Nebius console wizard) has
-# since been imported into local state for verification (`terraform import`,
-# not committed — state stays local/gitignored). Values below (etcd size,
-# k8s version, boot disk, GPU driver/OS, filesystem size) were reconciled to
-# match it (then the filesystem was grown to 2 TiB to match the exercise
-# spec), since those are sensible defaults for any deployment. The node
-# group's SSH access and extra security group remain environment-specific
-# (not secrets, but not sane defaults for a fresh deploy either) — they're
-# optional variables, unset by default; see terraform.tfvars.example. Set
-# them via a local terraform.tfvars (gitignored) to adopt an already-existing
-# node group's config without an `apply` trying to strip them. The console
-# wizard also gave the network/subnet/node group/filesystem auto-generated
-# names (e.g. "default-network") — renaming them to the names below is a
-# safe, non-destructive diff whenever this is applied.
+# The live PoC cluster was first built in the console wizard and later
+# imported into (local, gitignored) state; the values below match it. GPU
+# node SSH access and extra security groups are optional variables, see
+# terraform.tfvars.example.
 
 # Cloud-init for GPU nodes: the shared-filesystem mount (runcmd) always runs.
 # The SSH user/key block is only added if a key was provided (see

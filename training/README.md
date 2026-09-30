@@ -161,7 +161,8 @@ versus 44.3 GB.
 
 ### Qwen3-8B: one change at a time from a TP2 x DP8 baseline
 
-Micro-batch 1, global batch 64, seq 4096 (16384 for the long-sequence rows).
+Micro-batch 1, global batch 64, seq 4096 (global batch 32 at seq 16384 for
+the long-sequence rows).
 
 | Experiment | Change | Step | TFLOP/s/GPU | MFU | Peak mem |
 |---|---|---|---|---|---|

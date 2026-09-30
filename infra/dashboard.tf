@@ -1,6 +1,7 @@
 # Streamlit dashboard VM (dashboard/): a small CPU VM that queries MLflow
 # live and serves the strategy comparison + parallelism planner over plain
-# HTTP on port 80. Off by default; requires enable_mlflow.
+# HTTP on port 80. Gated by enable_dashboard (on by default); requires
+# enable_mlflow.
 #
 # NOTE: no authentication — anyone with the URL can view the dashboard
 # (read-only MLflow data; the MLflow password itself never leaves the VM).

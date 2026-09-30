@@ -113,7 +113,8 @@ def comparison_tab(runs: pd.DataFrame) -> None:
     df["memory_gb"] = df["metrics.peak_gpu_memory_gb"]
 
     st.caption(
-        "Steady-state = iterations 2-20 on 16 GPUs. Qwen3-8B runs change one "
+        "Steady-state = iterations 2-N, on 16 GPUs unless the label says "
+        "otherwise. Qwen3-8B runs change one "
         "setting from the TP2 x DP8 baseline (seq 4096, or seq 16384 for CP). "
         "MoE runs count active parameters only. MFU is vs the H100 bf16 dense "
         "peak (989 TFLOP/s) for every run, including FP8."

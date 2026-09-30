@@ -141,9 +141,11 @@ TP8's cost by ~2x (it assumes constant MFU) and memory by up to ~27%.
 
 Everything on the vacancy's list of topics has a measured run: DP, TP, PP,
 CP, EP, 3D parallelism, FP8, attention backend, CPU offloading and
-activation recomputation. Not covered: real data and convergence (all runs
-use mock data for 20 iterations), checkpointing to the shared filesystem,
-and anything above 16 GPUs.
+activation recomputation. Real data, a converging loss, checkpointing to the
+shared filesystem and resume after a failure are covered by the
+[end-to-end run](../training/README.md#end-to-end-run-qwen3-17b-on-fineweb-edu).
+Not covered: anything above 16 GPUs, and long pretraining runs (the strategy
+experiments are 20 iterations on mock data; the end-to-end run is ~1B tokens).
 
 ## References
 
