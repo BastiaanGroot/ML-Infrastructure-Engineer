@@ -19,8 +19,9 @@ or the Nebius CLI instead, as noted in each step.
    cluster with 2x8 H100 on an InfiniBand GPU cluster, shared filesystem,
    container registry, logs bucket, managed MLflow and the dashboard VM.
    ```bash
-   cd infra && terraform init
-   terraform apply -var="project_id=<project-id>" -var="enable_mlflow=true" -var="enable_dashboard=true"
+   cd infra && cp terraform.tfvars.example terraform.tfvars   # set project_id, tenant_id
+   export NEBIUS_IAM_TOKEN=$(nebius iam get-access-token)
+   terraform init && terraform apply
    nebius mk8s cluster get-credentials --id "$(terraform output -raw cluster_id)" --external
    ```
    Terraform also stores the generated MLflow admin password in SecretStash

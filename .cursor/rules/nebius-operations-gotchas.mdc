@@ -8,8 +8,8 @@ alwaysApply: true
 Hard-won lessons from working against the real `ml-infra-poc` project. Save time by checking here before re-debugging the same thing.
 
 - **Nebius CLI**: `NEBIUS_IAM_TOKEN` pollutes stdout with a `"token from ... is used"` line even in `--format json` output — always redirect to a file before parsing, never pipe straight to `jq`/`json.tool`. Strip the token itself of newlines/CR when capturing it (`tr -d '\n\r'`).
-- **Terraform provider auth**: the `service_account` block in `infra/versions.tf` needs real key files; for ad-hoc `plan`/`apply` with just a personal token via `NEBIUS_IAM_TOKEN`, comment it out temporarily and always restore it before committing.
-- **Gated resources**: pass `-var="enable_mlflow=true"` (etc.) on *every* `plan`/`apply` touching a flag-gated resource, or Terraform will plan to destroy it.
+- **Terraform provider auth**: `infra/versions.tf` uses token auth only — `export NEBIUS_IAM_TOKEN=$(nebius iam get-access-token | tr -d '\n\r')` before `plan`/`apply`. `project_id`/`tenant_id` come from the local (gitignored) `terraform.tfvars`.
+- **Gated resources**: `enable_mlflow`/`enable_dashboard` default to `true`; passing `=false` plans to destroy MLflow (and its tracking data) or the dashboard VM.
 - **Destructive-by-attribute-change resources**: e.g. `nebius_msp_mlflow_v1alpha1_cluster.public_access` forces full replacement (destroy+recreate, new ID/bucket) — no in-place update. Always check the plan for `-/+` before applying, confirm with the user first.
 - **SecretStash (`mysterybox`)**: a secret's `id` (e.g. `mbsec-...`) is a container, not the value — always retrieve via `payload get-by-key`. Soft-deleted secrets need `--show-scheduled-for-deletion` to even show up in `list`.
 - **kubectl on finished Jobs**: `kubectl exec` fails on terminated containers — use a short-lived debug pod with the same volume mounts instead.

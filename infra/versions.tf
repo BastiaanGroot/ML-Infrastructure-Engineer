@@ -13,13 +13,8 @@ terraform {
   }
 }
 
-# Auth: either set `token` (user access token) or the `service_account`
-# attributes below via env vars. See:
+# Auth: the provider reads a user access token from NEBIUS_IAM_TOKEN
+# (export NEBIUS_IAM_TOKEN=$(nebius iam get-access-token)). For service
+# account key auth instead, add a `service_account` block, see:
 # https://docs.nebius.com/terraform-provider/install
-provider "nebius" {
-  service_account = {
-    private_key_file_env = "AUTHKEY_PRIVATE_PATH"
-    public_key_id_env    = "AUTHKEY_PUBLIC_ID"
-    account_id_env       = "SA_ID"
-  }
-}
+provider "nebius" {}

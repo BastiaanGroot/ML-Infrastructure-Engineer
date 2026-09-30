@@ -101,7 +101,7 @@ variable "node_group_security_group_ids" {
 variable "enable_mlflow" {
   description = "Whether to create the Nebius-managed MLflow cluster (and its password secret) — see infra/README.md."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "mlflow_admin_username" {
@@ -119,7 +119,7 @@ variable "mlflow_size" {
 variable "enable_dashboard" {
   description = "Whether to create the Streamlit dashboard VM (see infra/dashboard.tf). Requires enable_mlflow=true."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "dashboard_platform" {

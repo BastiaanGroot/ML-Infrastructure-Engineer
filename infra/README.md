@@ -17,8 +17,10 @@ never committed).
    `terraform.tfvars` (gitignored) and set `project_id` and `tenant_id`. The
    optional settings there (GPU node SSH access, extra security group) are
    environment-specific, not secrets (an SSH key here is a *public* key).
-3. From this directory:
+3. From this directory (the provider authenticates with your Nebius CLI
+   login via `NEBIUS_IAM_TOKEN`, see [`versions.tf`](versions.tf)):
    ```bash
+   export NEBIUS_IAM_TOKEN=$(nebius iam get-access-token)
    terraform init
    terraform plan
    terraform apply
@@ -78,7 +80,7 @@ cluster and adds to the tenant's `editors` group (`tenant_id` variable).
   `user_data` on a stopped instance. The VM is stateless.
 
 ```bash
-terraform apply -var="enable_mlflow=true" -var="enable_dashboard=true"
+terraform apply   # enable_mlflow and enable_dashboard default to true
 terraform output dashboard_url
 ```
 
