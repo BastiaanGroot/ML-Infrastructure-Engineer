@@ -3,11 +3,6 @@ variable "project_id" {
   type        = string
 }
 
-variable "tenant_id" {
-  description = "Nebius tenant ID that owns the project (its \"editors\" group is looked up for mlflow-sa)."
-  type        = string
-}
-
 variable "cluster_name" {
   description = "Name for the mk8s cluster and related resources."
   type        = string
@@ -90,8 +85,7 @@ variable "node_group_security_group_ids" {
 
 # Nebius-managed MLflow (msp mlflow), for tracking Option 1's training
 # efficiency across distribution-strategy experiments. This also creates
-# MLflow's service account ("mlflow-sa") and adds it to the tenant's
-# "editors" group.
+# MLflow's service account ("mlflow-sa") with editor on this project.
 variable "enable_mlflow" {
   description = "Whether to create the Nebius-managed MLflow cluster (and its password secret) — see infra/README.md."
   type        = bool

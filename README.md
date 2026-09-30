@@ -19,7 +19,7 @@ or the Nebius CLI instead, as noted in each step.
    cluster with 2x8 H100 on an InfiniBand GPU cluster, shared filesystem,
    container registry, logs bucket, managed MLflow and the dashboard VM.
    ```bash
-   cd infra && cp terraform.tfvars.example terraform.tfvars   # set project_id, tenant_id
+   cd infra && cp terraform.tfvars.example terraform.tfvars   # set project_id
    export NEBIUS_IAM_TOKEN=$(nebius iam get-access-token)
    terraform init && terraform apply
    nebius mk8s cluster get-credentials --id "$(terraform output -raw cluster_id)" --external
@@ -30,7 +30,8 @@ or the Nebius CLI instead, as noted in each step.
    build and push to your registry (`terraform output registry_id`, without
    the `registry-` prefix), then update the image in `cluster-validator/k8s/*.yaml`.
 3. **Validate the cluster** ([run on the cluster](cluster-validator/README.md#run-on-the-cluster)):
-   create the pull, logs-upload and SSH Secrets, then run the per-node Job
+   create the logs-upload and SSH Secrets (the nodes pull the image with
+   their own service account), then run the per-node Job
    (`job-validate.yaml`) and the cross-node InfiniBand Job
    (`job-validate-multinode.yaml`). Results appear in the Job logs and on the
    `cluster-validator` [Grafana dashboard](cluster-validator/README.md#grafana-dashboard).

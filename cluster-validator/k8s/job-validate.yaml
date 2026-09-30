@@ -32,11 +32,6 @@ spec:
                 matchLabels:
                   app: cluster-validator
               topologyKey: kubernetes.io/hostname
-      # Requires a `nebius-registry` imagePullSecret if the node group's
-      # service account lacks Container Registry viewer access — see
-      # cluster-validator/README.md "Run on the cluster".
-      imagePullSecrets:
-        - name: nebius-registry
       containers:
         - name: cluster-validator
           image: cr.eu-north1.nebius.cloud/e00qprtt5j85j3syw7/cluster-validator:v9

@@ -75,19 +75,14 @@ kubectl logs -f job/cluster-validator-multinode        # pod 0 prints the result
 kubectl delete job,svc cluster-validator-multinode
 ```
 
-Node groups need a service account with at least `viewer` role attached to pull
-from Container Registry without extra auth (see [Nebius docs](https://docs.nebius.com/kubernetes/workloads/images-container-registry)).
-If a node group lacks this (e.g. a quick test cluster), create an
-`imagePullSecrets` entry from a short-lived token instead:
-
-```bash
-TOKEN=$(nebius iam get-access-token)
-kubectl create secret docker-registry nebius-registry \
-  --docker-server=cr.eu-north1.nebius.cloud --docker-username=iam --docker-password="$TOKEN"
-# then add `imagePullSecrets: [{name: nebius-registry}]` to the pod spec
-```
-
-(`--docker-password-stdin` isn't supported by all `kubectl` versions — use `--docker-password` with the token in a variable instead. The token is short-lived, so recreate the secret if it expires.)
+The GPU nodes pull the image with their own identity: `infra/` gives the
+node group a service account (`gpu-nodes-sa`) with `viewer` on the registry
+(see [Nebius docs](https://docs.nebius.com/kubernetes/workloads/images-container-registry)),
+so the Jobs need no `imagePullSecrets`. Only on a node group without such a
+service account would you need a pull secret from a short-lived token
+(`kubectl create secret docker-registry ... --docker-username=iam
+--docker-password="$(nebius iam get-access-token)"`), which stops working
+when the token expires.
 
 ## Configuration
 
@@ -211,39 +206,42 @@ to Object Storage (see above).
 
 Ran on the live cluster (2 nodes x 8 H100 SXM, InfiniBand, 2 TiB shared
 filesystem, a 2 TiB network disk per validator pod), both Jobs on
-2026-09-30 with image `v9` and the acceptance thresholds above. All checks
-passed on both nodes. Each pod uploads its `summary.json` to
+2026-09-30 with image `v9` and the acceptance thresholds above, right after
+both GPU nodes were replaced by fresh VMs (a node-group change in `infra/`),
+so this doubles as acceptance testing of new hardware. The nodes pulled the
+image with their own service account, no pull secret. All checks passed on
+both nodes. Each pod uploads its `summary.json` to
 `s3://ml-infra-poc-logs/cluster-validator/<pod-hostname>/<timestamp>/`.
 
 **Per node** ([`k8s/job-validate.yaml`](k8s/job-validate.yaml)):
 
-| Check | Node `computeinstance-e00qyx0nfcpnbgnk4z` | Node `computeinstance-e00gdss5xpj5gbybcs` |
+| Check | Node `computeinstance-e00p09d83nnxk1v1n7` | Node `computeinstance-e00t4j5hac544790rp` |
 |---|---|---|
-| GPU health (idle) | 8 GPUs, max 26°C, 0 ECC errors, no row remaps | 8 GPUs, max 34°C, 0 ECC errors, no row remaps |
-| GPU compute, bf16 GEMM per GPU (min-max) | 683-707 TFLOP/s | 684-712 TFLOP/s |
-| Max temperature under load, clock slowdown | 60°C, none | 70°C, none |
-| NCCL, 8 GPUs over NVLink (avg bus bandwidth) | 467.8 GB/s | 465.9 GB/s |
+| GPU health (idle) | 8 GPUs, max 26°C, 0 ECC errors, no row remaps | 8 GPUs, max 28°C, 0 ECC errors, no row remaps |
+| GPU compute, bf16 GEMM per GPU (min-max) | 683-708 TFLOP/s | 691-711 TFLOP/s |
+| Max temperature under load, clock slowdown | 61°C, none | 64°C, none |
+| NCCL, 8 GPUs over NVLink (avg bus bandwidth) | 467.9 GB/s | 466.0 GB/s |
 | LLM smoketest (Qwen3-0.6B generate + backward) | pass | pass |
-| Network disk, read / write | 217 / 222 MB/s | 217 / 222 MB/s |
-| Shared filesystem, read / write | 1410 / 1410 MB/s | 1483 / 1484 MB/s |
+| Network disk, read / write | 219 / 223 MB/s | 219 / 223 MB/s |
+| Shared filesystem, read / write | 1309 / 1310 MB/s | 1346 / 1346 MB/s |
 
 **Across nodes** ([`k8s/job-validate-multinode.yaml`](k8s/job-validate-multinode.yaml)):
 16/16 InfiniBand ports `ACTIVE` at 400 Gb/s, and `all_reduce_perf` over all
-16 GPUs averages **451.2 GB/s** bus bandwidth (threshold 400), with 0
+16 GPUs averages **451.5 GB/s** bus bandwidth (threshold 400), with 0
 out-of-bounds values:
 
 | Message size | 512 MiB | 1 GiB | 2 GiB | 4 GiB | 8 GiB |
 |---|---|---|---|---|---|
-| Bus bandwidth (out-of-place) | 415.8 GB/s | 445.8 GB/s | 459.1 GB/s | 460.8 GB/s | 466.9 GB/s |
+| Bus bandwidth (out-of-place) | 414.2 GB/s | 445.8 GB/s | 458.9 GB/s | 464.4 GB/s | 469.2 GB/s |
 
 **Reading these:**
 
 - **GPU health**: all 16 H100s visible and healthy, zero ECC errors, no
   pending or failed row remaps.
 - **GPU compute**: every GPU sustains 681-712 TFLOP/s of bf16 GEMM
-  (repeated across runs) while all 8 run at once, within 4% of each other.
+  (repeated across runs and on both the old and the replacement nodes) while all 8 run at once, within 4% of each other.
   The GPUs sit at their 700 W power cap, which is normal for a GEMM burn;
-  no thermal or hardware slowdown, and at most 70°C. This is the check that
+  no thermal or hardware slowdown, and at most 64-70°C. This is the check that
   catches one slow or throttling GPU, which would drag down every
   synchronous training step without showing up in the NCCL numbers.
 - **NCCL**: within a node, NVLink averages ~467 GB/s over 512 MiB-8 GiB.

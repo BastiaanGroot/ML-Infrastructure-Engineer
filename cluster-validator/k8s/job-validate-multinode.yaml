@@ -47,8 +47,6 @@ spec:
                 matchLabels:
                   app: cluster-validator-multinode
               topologyKey: kubernetes.io/hostname
-      imagePullSecrets:
-        - name: nebius-registry
       volumes:
         - name: infiniband
           hostPath:

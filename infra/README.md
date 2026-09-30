@@ -14,7 +14,7 @@ never committed).
 
 1. [Install the Nebius Terraform provider](https://docs.nebius.com/terraform-provider/install).
 2. Copy [`terraform.tfvars.example`](terraform.tfvars.example) to
-   `terraform.tfvars` (gitignored) and set `project_id` and `tenant_id`. The
+   `terraform.tfvars` (gitignored) and set `project_id`. The
    optional settings there (GPU node SSH access, extra security group) are
    environment-specific, not secrets (an SSH key here is a *public* key).
 3. From this directory (the provider authenticates with your Nebius CLI
@@ -41,7 +41,7 @@ A Nebius-managed MLflow cluster (`nebius_msp_mlflow_v1alpha1_cluster`,
 gated by `enable_mlflow`) is the experiment tracking backend for Option 1's
 distribution-strategy runs. MLflow reaches its Object Storage bucket through
 the `mlflow-sa` service account, which Terraform creates alongside the
-cluster and adds to the tenant's `editors` group (`tenant_id` variable).
+cluster and grants editor on this project only (a project group + access permit).
 
 - Tracking endpoint (public — `public_access = true`; still gated by
   HTTP basic auth below, no anonymous access):
@@ -60,6 +60,15 @@ cluster and adds to the tenant's `editors` group (`tenant_id` variable).
   nebius mysterybox payload get-by-key --secret-id "$(terraform output -raw mlflow_password_secret_id)" --key password
   ```
   (currently `mbsec-e00c36r6fzh80jfkc5`).
+
+## GPU node identity (registry pulls)
+
+The GPU node group runs as `gpu-nodes-sa`, whose `registry-readers` group
+has `viewer` on the container registry, so the kubelet pulls images such as
+`cluster-validator` without an `imagePullSecret`. Setting a node group's
+`service_account_id` rolls its nodes one at a time (`max_unavailable = 1`):
+on 2026-09-30 that replaced both GPU nodes in ~17 minutes, and the
+validator was re-run on the new VMs afterwards.
 
 ## Dashboard VM
 

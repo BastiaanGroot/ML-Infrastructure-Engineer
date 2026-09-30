@@ -1,9 +1,8 @@
 # Copy to terraform.tfvars (gitignored, never committed) and fill in for
-# your environment. project_id and tenant_id are required; the rest are
+# your environment. project_id is required; the rest are
 # optional - see variables.tf for defaults if left unset.
 
 project_id = "project-xxxxxxxxxxxxxxxxxxxxxx"
-tenant_id  = "tenant-xxxxxxxxxxxxxxxxxxxxxx"
 
 # Adopting an already-existing GPU node group (e.g. after `terraform
 # import`)? Set these to match it so `terraform plan` doesn't try to strip

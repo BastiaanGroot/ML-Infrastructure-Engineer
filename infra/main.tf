@@ -90,6 +90,30 @@ resource "nebius_compute_v1_gpu_cluster" "main" {
   infiniband_fabric = var.gpu_fabric
 }
 
+# Identity of the GPU nodes. The kubelet uses it to pull from the container
+# registry, so pods need no imagePullSecret built from a short-lived token.
+resource "nebius_iam_v1_service_account" "gpu_nodes" {
+  parent_id   = var.project_id
+  name        = "gpu-nodes-sa"
+  description = "GPU node group identity; can pull from the cluster-validator registry."
+}
+
+resource "nebius_iam_v1_group" "registry_readers" {
+  parent_id = var.project_id
+  name      = "registry-readers"
+}
+
+resource "nebius_iam_v1_group_membership" "gpu_nodes" {
+  parent_id = nebius_iam_v1_group.registry_readers.id
+  member_id = nebius_iam_v1_service_account.gpu_nodes.id
+}
+
+resource "nebius_iam_v1_access_permit" "registry_readers" {
+  parent_id   = nebius_iam_v1_group.registry_readers.id
+  resource_id = nebius_registry_v1_registry.cluster_validator.id
+  role        = "viewer"
+}
+
 resource "nebius_mk8s_v1_node_group" "gpu" {
   parent_id        = nebius_mk8s_v1_cluster.main.id
   name             = "gpu"
@@ -97,6 +121,8 @@ resource "nebius_mk8s_v1_node_group" "gpu" {
   version          = var.k8s_version
 
   template = {
+    service_account_id = nebius_iam_v1_service_account.gpu_nodes.id
+
     resources = {
       platform = var.gpu_platform
       preset   = var.gpu_preset
@@ -171,24 +197,31 @@ resource "nebius_mysterybox_v1_secret" "mlflow" {
 }
 
 # Service account MLflow uses for its Object Storage artifact bucket. It
-# needs editor rights at tenant level, granted via the tenant's built-in
-# "editors" group.
+# gets editor on this project only (a project group + access permit), not
+# the tenant-wide "editors" group, so its blast radius stays inside the PoC.
 resource "nebius_iam_v1_service_account" "mlflow" {
   count     = var.enable_mlflow ? 1 : 0
   parent_id = var.project_id
   name      = "mlflow-sa"
 }
 
-data "nebius_iam_v1_group" "tenant_editors" {
+resource "nebius_iam_v1_group" "mlflow_project_editors" {
   count     = var.enable_mlflow ? 1 : 0
-  name      = "editors"
-  parent_id = var.tenant_id
+  parent_id = var.project_id
+  name      = "mlflow-project-editors"
 }
 
-resource "nebius_iam_v1_group_membership" "mlflow_editors" {
+resource "nebius_iam_v1_group_membership" "mlflow_project_editors" {
   count     = var.enable_mlflow ? 1 : 0
-  parent_id = data.nebius_iam_v1_group.tenant_editors[0].id
+  parent_id = nebius_iam_v1_group.mlflow_project_editors[0].id
   member_id = nebius_iam_v1_service_account.mlflow[0].id
+}
+
+resource "nebius_iam_v1_access_permit" "mlflow_project_editor" {
+  count       = var.enable_mlflow ? 1 : 0
+  parent_id   = nebius_iam_v1_group.mlflow_project_editors[0].id
+  resource_id = var.project_id
+  role        = "editor"
 }
 
 resource "nebius_msp_mlflow_v1alpha1_cluster" "main" {
