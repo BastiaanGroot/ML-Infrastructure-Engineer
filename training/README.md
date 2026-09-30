@@ -106,11 +106,43 @@ kubectl logs -f job/prepare-data
 |---|---|---|---|---|---|---|---|
 | Training loss | 12.32 | 7.27 | 6.53 | 5.35 | 4.24 | 3.86 | **3.68** |
 
-Steady state: **2.09 s** per iteration, **368 TFLOP/s/GPU** (37% MFU),
-31.3k tokens/s per GPU (502k tokens/s for the cluster), 44.3 GB peak
-memory. That matches the synthetic-data `q1p7b-dp16` run (344 TFLOP/s at
-global batch 32), so real data loading from the shared filesystem costs no
-throughput.
+Steady state: **1.88 s** per iteration, **409 TFLOP/s/GPU** (41% MFU),
+34.9k tokens/s per GPU (558k tokens/s for the cluster), 44.3 GB peak
+memory, measured on the same config in the recovery run below. (The
+1000-iteration run itself logged 2.09 s and 368 TFLOP/s: it made a
+blocking MLflow call on every iteration, ~0.2 s per step, since made
+asynchronous. Its loss curve and checkpoint numbers are unaffected.) That's
+above the synthetic-data `q1p7b-dp16` run (344 TFLOP/s at global batch 32),
+since the larger batch gives more microbatches to overlap DP communication
+with, so real data loading from the shared filesystem costs no throughput.
+
+### Automatic recovery
+
+`e2e-*` Jobs retry (`backoffLimit: 6`) and use torchrun's elastic `c10d`
+rendezvous instead of fixed node ranks, so a lost node is recovered without
+a human. `e2e-q1p7b-autoresume` (the same run, 300 iterations, checkpoints
+every 100) tested it on 2026-09-30 by force-deleting the pod holding the
+last rank at iteration 222, 22 iterations after the iteration-200
+checkpoint:
+
+| Time after kill | What happened |
+|---|---|
+| +15 s | Job created a replacement pod |
+| +19 s | the surviving pod's torchrun agent saw a node waiting to join and stopped its workers (stuck in NCCL on the dead peer) |
+| +86 s | the re-rendezvous timed out and both pods exited |
+| +129 s | Job recreated both pods, which rendezvoused together |
+| **+195 s** | training again at iteration 204, from the iteration-200 checkpoint |
+
+Iterations 201-222 ran twice with identical losses (5.782 at 201, 5.664 at
+222), and the MLflow run continued as one run to iteration 300.
+
+The first attempt used the static rendezvous the strategy experiments
+use, and shows why the elastic mode matters. The surviving pod's workers
+waited on the dead peer until NCCL's watchdog fired, 18 minutes later.
+Meanwhile each replacement pod joined the survivor's stale rendezvous
+store, failed, and used up a retry. After 7 failures the Job gave up. The
+iteration-100 checkpoint it left was still valid: the elastic run resumed
+from it with identical losses (6.477 at 101).
 
 Next step for serving (not done here): convert the final checkpoint to
 Hugging Face format with Megatron-Bridge's `AutoBridge` export, then load it

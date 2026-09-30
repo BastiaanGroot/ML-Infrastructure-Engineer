@@ -59,7 +59,7 @@ or the Nebius CLI instead, as noted in each step.
 
 [`docs/training-strategy-outline.md`](docs/training-strategy-outline.md) designs the full distributed-training strategy for Qwen3 (600M through the genuine >100B 235B-A22B MoE) and maps model size to NVIDIA-recommended TP/PP/CP/EP degrees and GPU counts. [`training/`](training/) runs the part of it that fits on the 16x H100 cluster:
 
-- An **end-to-end run**: Qwen3-1.7B pretrained on ~1B tokens of FineWeb-Edu across both nodes, with checkpoints on the shared filesystem and a resume after a simulated failure.
+- An **end-to-end run**: Qwen3-1.7B pretrained on ~1B tokens of FineWeb-Edu across both nodes, with checkpoints on the shared filesystem, and automatic recovery from a killed node (training again ~3 minutes later, from the last checkpoint, with no human involved).
 - **Single-variable experiments** on Qwen3-1.7B/8B/32B and Qwen3-30B-A3B covering DP, TP, PP, CP, EP, 3D parallelism, FP8, attention backend, CPU offloading and activation recomputation, plus NVLink and InfiniBand NCCL bandwidth sweeps and Nsight Systems profiles.
 
 Everything is logged to MLflow. See the [README](training/README.md#results) for the results.

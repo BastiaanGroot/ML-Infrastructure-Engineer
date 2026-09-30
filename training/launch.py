@@ -33,7 +33,8 @@ E2E = (
 )
 
 # name -> (options, script, args). Options: nodes (default 2), nproc (GPUs per
-# node, default 8), profile (wrap node rank 0 in nsys).
+# node, default 8), profile (wrap node rank 0 in nsys), retries (Job
+# backoffLimit, default 0).
 EXPERIMENTS = {
     # NCCL all_reduce bandwidth: NVLink within a node, 16 GPUs over
     # InfiniBand, and one GPU per node (a single NIC).
@@ -76,7 +77,14 @@ EXPERIMENTS = {
     "prof-q8b-tp8-2nodes": ({"profile": True, "nproc": 4}, "run_experiment.py", f"{Q8B} --tensor-parallelism 8"),
     # End-to-end: real data, loss curve, checkpoints on the shared filesystem.
     # Re-launching after a failure resumes from the latest checkpoint.
-    "e2e-q1p7b": ({}, "run_experiment.py", E2E),
+    "e2e-q1p7b": ({"retries": 6}, "run_experiment.py", E2E),
+    # Shorter copy with its own checkpoints to demo recovery without a
+    # human: kill a pod mid-run and the Job's retries resume from the
+    # latest checkpoint.
+    "e2e-q1p7b-autoresume": ({"retries": 6}, "run_experiment.py",
+                             E2E.replace("--train-iters 1000", "--train-iters 300")
+                             .replace("--save-interval 250", "--save-interval 100")
+                             .replace("checkpoints/e2e-q1p7b", "checkpoints/e2e-q1p7b-autoresume")),
 }
 
 
@@ -100,6 +108,23 @@ def mlflow_tracking_uri() -> str:
     return f"https://{endpoint}"
 
 
+def rdzv_args(name: str, options: dict) -> str:
+    """torchrun rendezvous flags. Static (fixed node ranks) by default.
+
+    Runs with retries use elastic c10d rendezvous instead: when the Job
+    replaces a failed pod, the surviving pod's torchrun agent sees a node
+    waiting to join, kills its workers (stuck in NCCL waiting on the dead
+    peer) and restarts both nodes together, which then resume from the
+    latest checkpoint. With static rendezvous the survivor instead hangs
+    until NCCL's timeout, and each replacement pod fails against its stale
+    store, burning the Job's retries.
+    """
+    if options.get("retries"):
+        return (f'--rdzv-backend=c10d --rdzv-endpoint="$MASTER_ADDR:$MASTER_PORT" '
+                f'--rdzv-id={name} --max-restarts=3')
+    return '--node-rank="$NODE_RANK" --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT"'
+
+
 def render(name: str) -> str:
     options, script, args = EXPERIMENTS[name]
     script_args = f"{args} --mlflow-run-name {name}".strip()
@@ -112,6 +137,8 @@ def render(name: str) -> str:
         "SCRIPT": script,
         "SCRIPT_ARGS": script_args,
         "PROFILE": "1" if options.get("profile") else "0",
+        "BACKOFF_LIMIT": str(options.get("retries", 0)),
+        "RDZV_ARGS": rdzv_args(name, options),
         "NCCL_DEBUG": os.environ.get("NCCL_DEBUG", "WARN"),
         "MLFLOW_TRACKING_URI": mlflow_tracking_uri(),
     }
