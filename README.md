@@ -85,6 +85,11 @@ Choices made for the [take-home exercise](docs/ML-Infrastructure-Engineer.md), i
 
 *(This is the single canonical note on this — other docs just link here.)*
 
+The assignment specifies 16x H200. When the cluster was built, the 8-GPU
+H200 node shape (`gpu-h200-sxm`, `8gpu-128vcpu-1600gb`) had no on-demand
+capacity on this tenant (only 1-GPU slices), so the PoC moved to 16x H100.
+That is also the GPU the customer plans to reserve (512x H100).
+
 The GPU node group runs **2 nodes x 8 H100** (`gpu-h100-sxm`,
 `8gpu-128vcpu-1600gb`, 16 GPUs total), attached to a
 `nebius_compute_v1_gpu_cluster` on **`fabric-4`** so the nodes share an
