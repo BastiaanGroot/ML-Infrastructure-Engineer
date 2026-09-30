@@ -101,7 +101,8 @@ def comparison_tab(runs: pd.DataFrame) -> None:
         help="'profile' runs ran under nsys (5-37% overhead); 'e2e' is the "
         "real-data run with checkpointing (larger global batch).",
     )
-    df = runs[runs["run_kind"].isin(kinds) & runs["metrics.steady_tflops_per_gpu"].notna()].copy()
+    df = runs[runs["run_kind"].isin(kinds) & runs["metrics.steady_tflops_per_gpu"].notna()]
+    df = df.drop_duplicates("run_name", keep="last").copy()  # re-runs: newest wins
     if df.empty:
         st.info("No runs with steady-state metrics for the selected kinds.")
         return
