@@ -23,8 +23,8 @@ or the Nebius CLI instead, as noted in each step.
    terraform apply -var="project_id=<project-id>" -var="enable_mlflow=true" -var="enable_dashboard=true"
    nebius mk8s cluster get-credentials --id "$(terraform output -raw cluster_id)" --external
    ```
-   Store the generated MLflow admin password in SecretStash as described in
-   [infra/README.md "MLflow"](infra/README.md#mlflow-for-option-1-experiment-tracking).
+   Terraform also stores the generated MLflow admin password in SecretStash
+   (`terraform output mlflow_password_secret_id`, key `password`).
 2. **Validator image** ([`cluster-validator/`](cluster-validator/README.md#build--push)):
    build and push to your registry (`terraform output registry_id`, without
    the `registry-` prefix), then update the image in `cluster-validator/k8s/*.yaml`.

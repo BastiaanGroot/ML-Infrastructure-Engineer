@@ -46,7 +46,7 @@ browsable in the [dashboard](../dashboard/README.md).
 kubectl create secret generic mlflow-creds \
   --from-literal=MLFLOW_TRACKING_USERNAME=admin \
   --from-file=MLFLOW_TRACKING_PASSWORD=<(nebius mysterybox payload get-by-key \
-      --secret-id mbsec-e00s29kcffh4yr0mh5 --key password --format json \
+      --secret-id mbsec-e00c36r6fzh80jfkc5 --key password --format json \
       | grep -v "token from" | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["string_value"],end="")')
 
 ./launch.py --list                      # all experiment names

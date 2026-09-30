@@ -5,29 +5,20 @@
 # NOTE: no authentication — anyone with the URL can view the dashboard
 # (read-only MLflow data; the MLflow password itself never leaves the VM).
 #
-# Credentials: Terraform writes the MLflow admin password into a SecretStash
-# secret (write-only, not kept in state). The VM runs as dashboard-sa, which
-# can read that one secret via a group access permit, and fetches it at boot
-# — nothing secret is baked into cloud-init.
+# Credentials: the VM runs as dashboard-sa, which can read only the MLflow
+# password secret (nebius_mysterybox_v1_secret.mlflow in main.tf) via a group
+# access permit, and fetches it at boot — nothing secret is baked into
+# cloud-init.
 
 locals {
   dashboard_count = var.enable_dashboard ? 1 : 0
 }
 
-resource "nebius_mysterybox_v1_secret" "dashboard" {
-  count     = local.dashboard_count
-  parent_id = var.project_id
-  name      = "${var.cluster_name}-dashboard"
-
-  # The API only accepts secret_version at create time; changing the payload
-  # means replacing the secret.
-  sensitive = {
-    secret_version = {
-      payload = [
-        { key = "mlflow_password", string_value = random_password.mlflow_admin[0].result },
-      ]
-    }
-  }
+resource "nebius_iam_v1_service_account" "dashboard" {
+  count       = local.dashboard_count
+  parent_id   = var.project_id
+  name        = "dashboard-sa"
+  description = "Identity of the dashboard VM; can only read the MLflow password secret."
 
   lifecycle {
     precondition {
@@ -35,13 +26,6 @@ resource "nebius_mysterybox_v1_secret" "dashboard" {
       error_message = "enable_dashboard requires enable_mlflow=true (the dashboard reads from MLflow)."
     }
   }
-}
-
-resource "nebius_iam_v1_service_account" "dashboard" {
-  count       = local.dashboard_count
-  parent_id   = var.project_id
-  name        = "dashboard-sa"
-  description = "Identity of the dashboard VM; can only read the dashboard secret."
 }
 
 # Access permits target a group, not a service account directly.
@@ -60,7 +44,7 @@ resource "nebius_iam_v1_group_membership" "dashboard" {
 resource "nebius_iam_v1_access_permit" "dashboard_secret" {
   count       = local.dashboard_count
   parent_id   = nebius_iam_v1_group.dashboard_secret_readers[0].id
-  resource_id = nebius_mysterybox_v1_secret.dashboard[0].id
+  resource_id = nebius_mysterybox_v1_secret.mlflow[0].id
   role        = "mysterybox.payload-viewer"
 }
 
@@ -140,7 +124,7 @@ resource "nebius_compute_v1_instance" "dashboard" {
   }]
 
   cloud_init_user_data = templatefile("${path.module}/dashboard-cloud-init.yaml.tftpl", {
-    secret_id           = nebius_mysterybox_v1_secret.dashboard[0].id
+    secret_id           = nebius_mysterybox_v1_secret.mlflow[0].id
     mlflow_tracking_uri = "https://${nebius_msp_mlflow_v1alpha1_cluster.main[0].status.tracking_endpoint}"
     mlflow_username     = var.mlflow_admin_username
     git_repo_url        = var.dashboard_git_repo_url

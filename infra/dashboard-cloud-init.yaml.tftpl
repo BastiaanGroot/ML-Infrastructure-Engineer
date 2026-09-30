@@ -36,7 +36,7 @@ write_files:
         python3 -c 'import json,sys; t=open(sys.argv[1]).read(); d=json.loads(t[t.index("{"):]); print(d.get("string_value") or d["data"]["string_value"])' /run/dashboard/raw.json
         rm -f /run/dashboard/raw.json
       }
-      mlflow_password=$(get_secret mlflow_password)
+      mlflow_password=$(get_secret password)
       umask 077
       cat > /run/dashboard/env <<ENV
       MLFLOW_TRACKING_URI='${mlflow_tracking_uri}'
