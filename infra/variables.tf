@@ -8,12 +8,6 @@ variable "tenant_id" {
   type        = string
 }
 
-variable "region" {
-  description = "Nebius region."
-  type        = string
-  default     = "eu-north1"
-}
-
 variable "cluster_name" {
   description = "Name for the mk8s cluster and related resources."
   type        = string

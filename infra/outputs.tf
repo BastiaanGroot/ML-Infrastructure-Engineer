@@ -30,12 +30,6 @@ output "cluster_validator_logs_service_account_id" {
   value       = nebius_iam_v1_service_account.cluster_validator_logs.id
 }
 
-output "mlflow_admin_password" {
-  description = "Generated MLflow admin password (only set when enable_mlflow=true). Prefer reading it from the mlflow_password_secret_id SecretStash secret."
-  value       = try(random_password.mlflow_admin[0].result, null)
-  sensitive   = true
-}
-
 output "mlflow_password_secret_id" {
   description = "SecretStash secret holding the MLflow admin password under key 'password' (only set when enable_mlflow=true)."
   value       = try(nebius_mysterybox_v1_secret.mlflow[0].id, null)

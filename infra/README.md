@@ -25,8 +25,9 @@ never committed).
    terraform plan
    terraform apply
    ```
-4. See [`variables.tf`](variables.tf) for other overridable settings (region,
-   GPU platform/preset/fabric, node count). Defaults are 2x 8x H100
+4. See [`variables.tf`](variables.tf) for other overridable settings (GPU
+   platform/preset/fabric, node count). The region follows the project
+   (`eu-north1` here). Defaults are 2x 8x H100
    (`gpu-h100-sxm`, `8gpu-128vcpu-1600gb`) in a GPU cluster on `fabric-4` —
    see the root README's ["Hardware"](../README.md#hardware-2x8-h100-with-infiniband)
    section for why, and how pods get InfiniBand access.
