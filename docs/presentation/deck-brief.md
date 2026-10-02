@@ -7,7 +7,7 @@ file alone, without access to the repo. Every number comes from the
 2026-09-30 re-run documented in `training/README.md` and
 `cluster-validator/README.md`.
 
-Structure: 15 core slides (about 15 minutes), 4 optional evidence slides for
+Structure: 16 core slides (about 16 minutes), 2 optional evidence slides for
 screenshots, and 5 appendix slides for Q&A.
 
 The word-for-word speaker script is in [`transcript.md`](transcript.md); it
@@ -33,7 +33,7 @@ from the attached brief, deck-brief.md. Follow it exactly:
 - Use the design system in section 2 on every slide (navy background, panel
   colours, lime/indigo roles, Arial, sizes, margins). No accent bars, stripes,
   gradients, shadows, emoji or clip art.
-- Build slides 1-15, E1-E4 and A1-A5 in order, with the exact titles, bullets,
+- Build slides 1-16, E1-E2 and A1-A5 in order, with the exact titles, bullets,
   table contents and speaker notes given. Speaker notes go in via
   slide.addNotes().
 - Build every chart as a native, editable pptxgenjs chart (addChart) with the
@@ -62,13 +62,10 @@ Name the files as below so the mapping is unambiguous.
 | `shot-validator-result.png` | `kubectl logs -l job-name=cluster-validator --prefix` ending in the `RESULT:` line | E1 |
 | `shot-multinode.png` | Cross-node validator output: 16/16 IB ports ACTIVE and the `all_reduce_perf` table | E1 |
 | `shot-mlflow-runs.png` | MLflow experiment `qwen3-parallelism-experiments`, run list filtered on tag `cluster=2x8-h100-ib` | E2 |
-| `shot-mlflow-e2e-loss.png` | MLflow `e2e-q1p7b` loss chart (one continuous run across the resume) | E2 |
 | `shot-mlflow-autoresume.png` | MLflow `e2e-q1p7b-autoresume` run (one run to iteration 300 across the injected node failure) | E2 |
-| `shot-dashboard-strategy.png` | Streamlit dashboard, strategy comparison tab | E3 |
-| `shot-dashboard-comm.png` | Streamlit dashboard, communication tab (NCCL sweeps + Nsight breakdown) | E3 |
-| `shot-dashboard-planner.png` | Streamlit dashboard, parallelism planner with the predicted-vs-measured table | E3 |
-| `shot-console-cluster.png` | Nebius console: GPU cluster on fabric-4 and the 2 x 8 H100 node group | E4 |
-| `shot-kubectl-pods.png` | Optional: `kubectl get pods -o wide` during a 2-node training job | E4 |
+| `shot-dashboard-strategy.png` | Streamlit dashboard, strategy comparison tab | Slide 15 |
+| `shot-dashboard-comm.png` | Streamlit dashboard, communication tab (NCCL sweeps + Nsight breakdown) | Slide 15 |
+| `shot-dashboard-planner.png` | Streamlit dashboard, parallelism planner with the predicted-vs-measured table | Slide 15 |
 
 ### 1.3 Logo and icons to upload (optional)
 
@@ -195,9 +192,9 @@ the logo wasn't uploaded, omit it; don't draw a substitute.
 
 ---
 
-## 3. Core slides (15)
+## 3. Core slides (16)
 
-Timing is shown per slide; the total is about 15 minutes.
+Timing is shown per slide; the total is about 16 minutes.
 
 ---
 
@@ -1008,7 +1005,40 @@ Speaker notes:
 
 ---
 
-### Slide 15: Wrap-up (1 min)
+### Slide 15: Results dashboard (0.75 min)
+
+- Kicker: `RESULTS DASHBOARD`
+- Title: `The results dashboard turns the experiments into a planning tool`
+- Three screenshot placeholders in a row, y 1.8, h 4.4, w 3.93 each, at
+  x 0.5, 4.7 and 8.9: `SCREENSHOT: strategy comparison tab`
+  (`shot-dashboard-strategy.png`), `SCREENSHOT: communication tab (NCCL +
+  Nsight)` (`shot-dashboard-comm.png`), `SCREENSHOT: parallelism planner with
+  predicted vs measured` (`shot-dashboard-planner.png`).
+- Caption under each, y 6.3, h 0.5 (11 pt; first line bold white, second
+  line muted):
+  1. `Compare layouts` / `Every MLflow run, live`
+  2. `See where time goes` / `NCCL sweeps and Nsight profiles`
+  3. `Plan a dense model` / `Ranks TP x PP x DP layouts, checked against the
+     measured runs`
+- Footer: `Source: dashboard/ (Streamlit, reads MLflow live; planner in
+  dashboard/recommender.py)`
+
+Speaker notes:
+
+> The dashboard reads MLflow live. The first tab compares every strategy run,
+> the second shows where time goes from the NCCL sweeps and Nsight profiles,
+> and the third is a planner: an analytical model that ranks tensor, pipeline
+> and data parallel layouts for a dense model on a given cluster, for example
+> Llama 3.1 405B on 64 nodes. It ships with five dense presets, and adding a
+> model is a one-line entry; mixture-of-experts models aren't modelled, so
+> the 235B MoE plan on the previous slide comes from NVIDIA's recipe. On our
+> measured 8B and 32B runs it ranks layouts correctly, but underestimates
+> TP8's cost by about 2x and memory by up to about 27%, so treat it as a
+> starting point, then measure.
+
+---
+
+### Slide 16: Wrap-up (1 min)
 
 - Kicker: `WRAP-UP`
 - Title: `Everything is reproducible and observable, and the next steps are
@@ -1063,9 +1093,8 @@ Speaker notes:
 
 ## 4. Evidence slides (optional, screenshots)
 
-Place these after slide 15. Use them live in Q&A, or flash them briefly
-during the talk if time allows. Kicker `EVIDENCE`. If a screenshot isn't
-uploaded, draw the placeholder (section 2.5).
+Place these after slide 16. Use them live in Q&A. Kicker `EVIDENCE`. If a
+screenshot isn't uploaded, draw the placeholder (section 2.5).
 
 ### E1: The validator in Grafana and the logs
 
@@ -1087,40 +1116,12 @@ uploaded, draw the placeholder (section 2.5).
 - Title: `Every run is tracked in MLflow, including across restarts`
 - Placeholder left, x 0.5, y 1.8, w 6.05, h 5.0: `SCREENSHOT: MLflow run
   list, tag cluster=2x8-h100-ib` (`shot-mlflow-runs.png`).
-- Two stacked placeholders right, x 6.78, w 6.05, h 2.4, at y 1.8 and 4.4:
-  `SCREENSHOT: e2e-q1p7b loss chart` (`shot-mlflow-e2e-loss.png`) and
-  `SCREENSHOT: e2e-q1p7b-autoresume run to iteration 300`
-  (`shot-mlflow-autoresume.png`).
-- Notes: `One MLflow run survives both the manual relaunch and the injected
-  node failure, so the loss curve is continuous.`
-
-### E3: Results dashboard
-
-- Title: `The results dashboard turns the experiments into a planning tool`
-- Three placeholders in a row, y 1.8, h 4.6, w 3.93 each, at x 0.5, 4.7,
-  8.9: `SCREENSHOT: strategy comparison tab` (`shot-dashboard-strategy.png`),
-  `SCREENSHOT: communication tab (NCCL + Nsight)`
-  (`shot-dashboard-comm.png`), `SCREENSHOT: parallelism planner with
-  predicted vs measured` (`shot-dashboard-planner.png`).
-- Caption under each (10 pt muted): `Compare layouts`, `See where time
-  goes`, `Plan a new model`.
-- Notes: `The planner is an analytical model that ranks TP x PP x DP layouts
-  for a new model (memory: weights, grads, sharded optimizer, activations;
-  time: compute, communication over the slowest link, pipeline bubble) and
-  shows its prediction next to the measured MLflow runs. On the 8B and 32B
-  runs it ranks layouts correctly, but underestimates TP8's cost by about 2x
-  (it assumes constant MFU) and memory by up to about 27%.`
-
-### E4: Nebius console
-
-- Title: `The GPU cluster and node group in the Nebius console`
-- Placeholder, x 0.5, y 1.8, w 8.0, h 5.0: `SCREENSHOT: GPU cluster on
-  fabric-4 and the 2 x 8 H100 node group` (`shot-console-cluster.png`).
-- Optional placeholder right, x 8.75, y 1.8, w 4.08, h 5.0: `SCREENSHOT:
-  kubectl get pods -o wide, one training pod per node`
-  (`shot-kubectl-pods.png`).
-- Notes: `Everything here was created by Terraform; nothing was clicked
-  together in the console.`
+- Placeholder right, x 6.78, y 1.8, w 6.05, h 5.0: `SCREENSHOT:
+  e2e-q1p7b-autoresume run to iteration 300` (`shot-mlflow-autoresume.png`).
+- Notes: `Every run is stored in MLflow with its parameters, tags and live
+  metrics, so the results can be compared or reproduced later. The
+  failure-test run continues as one MLflow run across the injected node
+  failure, so its loss curve is continuous.`
 
 ---
 

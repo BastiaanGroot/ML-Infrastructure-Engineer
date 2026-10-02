@@ -1,10 +1,10 @@
 # Demo-day speaker transcript
 
-Word-for-word script for the 15 core slides in
+Word-for-word script for the 16 core slides in
 [`deck-brief.md`](deck-brief.md), plus short spoken answers for the evidence
 and appendix slides and the questions most likely to come up.
 
-- **Length:** about 15 minutes (15:15 with the per-slide budgets below), at
+- **Length:** about 16 minutes (16:00 with the per-slide budgets below), at
   roughly 135 words per minute.
 - **Stage cues** are in [brackets]; don't read them out.
 - **Numbers** match the brief and its data reference (section 6). If a
@@ -218,13 +218,25 @@ benchmark reaches about 250 teraflops per GPU. Before training, run the
 validator on every batch of delivered nodes, and a short scaling ramp to
 confirm the 90 percent.
 
-### Slide 15: Wrap-up (1:00, ends at 15:15)
+### Slide 15: Results dashboard (0:45, ends at 15:00)
+
+To plan runs like this yourselves, we built a small results dashboard that
+reads MLflow live. [point at the first screenshot] The first tab compares
+every strategy run. [second] The second shows where the time goes, from the
+NCCL sweeps and the Nsight profiles. [third] And the third is a planner: you
+pick a dense model and a cluster size, and it ranks tensor, pipeline and
+data parallel layouts by memory and step time, next to what we actually
+measured. It ships with five example models, from Qwen3 1.7B to Llama 3.1
+405B, and adding your own is one line. It's a first estimate, not a
+replacement for measuring.
+
+### Slide 16: Wrap-up (1:00, ends at 16:00)
 
 To wrap up. Everything you've seen can be rebuilt from an empty project in
 six documented steps: infrastructure, the validator image, validation, data
-preparation, training and monitoring. Every run is visible in MLflow, the
-cluster in Grafana, and the results dashboard compares strategies and plans
-layouts for new models. The next steps: use the validator as your acceptance
+preparation, training and monitoring. Every run is stored in MLflow, the
+cluster is visible in Grafana, and the dashboard turns the results into a
+planning tool. The next steps: use the validator as your acceptance
 test on the reserved capacity; export the trained checkpoint to Hugging Face
 format, which is the bridge to your own inference server; turn the validator
 thresholds into alerts; and add authentication to the dashboard, with
@@ -243,22 +255,12 @@ the RESULT line at the end, and the same summary is kept in Object Storage
 for ninety days. On the right you can see all sixteen InfiniBand ports up and
 the raw all-reduce table.
 
-**E2: MLflow.** Every run is in MLflow, tagged by cluster, with loss, step
-time, throughput and memory logged live. The end-to-end run is a single
-MLflow run across the manual relaunch, and the failure-test run is a single
-run to iteration 300 across the injected node failure, so the loss curves
-are continuous.
-
-**E3: Results dashboard.** The dashboard reads MLflow live. The first tab
-compares strategies, the second shows where time goes from the NCCL sweeps
-and Nsight profiles, and the third is a planner that ranks tensor, pipeline
-and data parallel layouts for a new model. On the 8B and 32B runs it ranks
-layouts correctly, but it's optimistic about tensor parallel 8 by about a
-factor of two, so treat it as a starting point, then measure.
-
-**E4: Nebius console.** This is the GPU cluster on fabric 4 and the node
-group with two by eight H100s. Everything here was created by Terraform;
-nothing was clicked together in the console.
+**E2: MLflow.** [point at the run list] Every run we did is stored in
+MLflow, tagged by cluster, with its parameters and its loss, step time,
+throughput and memory logged live, so you can compare or reproduce any of
+them later. [point at the right] The failure-test run continues as one
+MLflow run to iteration 300 across the injected node failure, so its loss
+curve is continuous.
 
 ## Appendix slides (show if asked)
 
@@ -333,6 +335,14 @@ rule comes from the 30-billion MoE model on the default software stack,
 where spreading experts was 2.6 times slower. NVIDIA's tuned 235B benchmark
 uses optimized all-to-all communication and spreads experts over four nodes.
 That's a setting to re-test on the reserved cluster, not something to assume.
+
+**Can the planner handle our model?** If it's a dense model, yes: it ships
+with five example presets, and adding yours is one line with its parameter
+count, layers and hidden size. It doesn't model mixture-of-experts yet; for
+those, start from NVIDIA's recipe, as we did for the 235B plan. On our
+measured runs it ranks layouts correctly but is optimistic about tensor
+parallel 8 by about a factor of two, so use it to shortlist layouts, then
+measure.
 
 **How do we get to inference?** Megatron-Bridge exports the trained
 checkpoint to Hugging Face format, which standard inference servers load
