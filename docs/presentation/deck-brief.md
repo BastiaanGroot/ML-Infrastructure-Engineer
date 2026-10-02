@@ -10,6 +10,9 @@ file alone, without access to the repo. Every number comes from the
 Structure: 15 core slides (about 15 minutes), 4 optional evidence slides for
 screenshots, and 5 appendix slides for Q&A.
 
+The word-for-word speaker script is in [`transcript.md`](transcript.md); it
+isn't needed to build the deck.
+
 ---
 
 ## 1. How to use this brief
