@@ -658,12 +658,24 @@ Speaker notes:
   - Caption under the timeline at y 5.45 (10 pt muted): `300-iteration copy
     of the same run (e2e-q1p7b-autoresume); checkpoints 22.4 GB, ~17 s each,
     on the shared filesystem`.
-- Bottom: four key-number panels, y 5.95, h 0.85, w 2.95 each, at x 0.5,
-  3.63, 6.76, 9.89 (32 pt bold number, 10.5 pt muted label beside or below):
-  1. `1.88 s` (white) / `steady step time`
-  2. `409` (lime) / `TFLOP/s per GPU (41% MFU)`
-  3. `558k` (white) / `tokens/s, whole cluster`
-  4. `195 s` (lime) / `injected node failure to training, automatic`
+- Bottom left: MFU ceiling bar, one panel at x 0.5, y 5.95, w 6.08, h 0.9,
+  built from native shapes (positions in slide inches):
+  - Line 1, y 5.98: `409 TFLOP/s per GPU = 41% MFU` (16 pt bold lime) at
+    x 0.7, w 3.6; and right-aligned in x 4.4-6.5, 10 pt muted:
+    `Megatron-LM reference, ~2B model on H100: 41%`.
+  - Track bar: x 0.7 to 6.4 (5.7 in = 0-989 TFLOP/s, so x = 0.7 + value x
+    0.005764), y 6.4, h 0.16, fill `1E3547`, no outline.
+  - Lime fill over the track from 0 to 409 (x 0.7 to 3.06). Label below
+    the bar, centred on x 3.06, 10 pt white: `this run 409`.
+  - White 1 pt dashed vertical tick at 700 (x 4.73), from y 6.34 to 6.62.
+    Label below the bar, left-aligned from x 4.68, 10 pt secondary:
+    `best-case matmul ~700 (71%)`.
+  - Muted tick at 989 (x 6.4). Its label sits above the bar's right end,
+    right-aligned to x 6.4, y 6.22, 10 pt muted: `989 spec peak`.
+- Bottom right: two key-number panels, y 5.95, h 0.9, w 2.95 each, at x 6.76
+  and 9.89 (32 pt bold number, 10.5 pt muted label beside or below):
+  1. `558k` (white) / `tokens/s, whole cluster`
+  2. `195 s` (lime) / `injected node failure to training, automatic`
 - Footer: `Source: training/README.md, MLflow e2e-q1p7b and
   e2e-q1p7b-autoresume; throughput is the steady state of the same config
   with asynchronous logging.`
@@ -672,7 +684,11 @@ Speaker notes:
 
 > This is their daily loop: data tokenized once onto the shared filesystem,
 > checkpoints, and runs that survive a failure. The loss drops from 12.3 to
-> 3.7 over 1.05B tokens, at 409 TFLOP/s per GPU. To test reliability we
+> 3.7 over 1.05B tokens, at 1.88 s per step and 409 TFLOP/s per GPU. That's
+> 41% MFU: the 989 TFLOP/s peak is a spec-sheet number that even a single
+> large matrix multiply only reaches 71% of, and real training also runs
+> attention, normalization, the optimizer and communication, so 41% matches
+> Megatron-LM's own reference for a model this size. To test reliability we
 > injected a node failure: we deleted the training pod on one node mid-run.
 > The Kubernetes Job replaced it, torchrun's elastic rendezvous brought both
 > nodes back together, and training resumed from the last checkpoint in 195
@@ -926,8 +942,14 @@ Speaker notes:
   3. `Scale out with DP (99.7% measured across the node boundary); use the
      smallest TP that fits`
 
-  Below the panels, y 5.35, w 4.2, h 0.5 (13 pt secondary):
-  `Alternatively: 8 concurrent 64-GPU fine-tuning jobs (see notes).`
+  Below the rules, a fourth panel at y 5.46, w 4.2, h 1.39: heading
+  `WHAT TO EXPECT AT 64 NODES` (11 pt bold lime), then three lines (11 pt
+  white, may wrap):
+  - `Measured: 99.7% scaling efficiency, 1 to 2 nodes (same work per GPU)`
+  - `Expected: ~90% from 2 to 64 nodes (~98% per doubling, as in Nebius
+    MLPerf 512 → 1,024 GPUs and Megatron-LM on 4,608 H100s)`
+  - `235B reference: ~250 TFLOP/s/GPU on 256 H100s (NVIDIA Megatron-Bridge,
+    FP8)`
 - Right top: 64-node grid, native shapes, area x 5.0 to 12.83, y 1.8 to 4.35.
   - Eight rows of eight node boxes. Row label column at x 5.0, w 1.1: rows
     1, 3, 5 and 7 are labelled `DP replica 1` ... `DP replica 4` (10 pt;
@@ -955,18 +977,31 @@ Speaker notes:
 | Data (DP) | 4 | 4 replicas | InfiniBand, overlaps backward (99.7% measured) |
 
 - Footer: `Source: docs/training-strategy-outline.md, NVIDIA Megatron-Bridge
-  Qwen3 recipes`
+  Qwen3 recipes and performance archive; Nebius MLPerf Training v5.0;
+  Megatron-LM README (section 6.6)`
 
 Speaker notes:
 
 > Apply the three rules measured on 16 GPUs to 512. NVIDIA's 235B-A22B
 > pretraining recipe needs 128 GPUs per replica (TP4, PP16, CP2, EP8), so 512
 > GPUs give four data-parallel replicas; DP is the dimension we measured at
-> 99.7% across the node boundary. The alternative is eight concurrent 64-GPU
-> SFT or PEFT jobs, since NVIDIA's 235B SFT and PEFT recipes each need 64
-> GPUs. 16 GPUs was right-sized for 30-32B fine-tuning; 512 covers 235B-A22B
-> pretraining with room. Either way, run the validator on every batch of
-> delivered nodes first.
+> 99.7% across the node boundary. That 99.7% doesn't carry over to 64 nodes
+> by itself: latency, more switch hops and stragglers add up. Two public
+> references on Hopper and InfiniBand both lose about 2% per doubling of
+> GPUs: Nebius's own MLPerf run went from 512 to 1,024 GPUs at 1.97x, and
+> Megatron-LM's GPT-3 run on up to 4,608 H100s. Five doublings from 2 to 64
+> nodes gives about 90%, and both are harder strong-scaling tests, so that's
+> conservative. For dense layouts that means roughly 38% MFU (42% x 0.9), in
+> line with Llama 3 405B's 38-43% on 16,000 H100s; for this MoE model,
+> NVIDIA's own H100 benchmark reaches about 250 TFLOP/s per GPU, about 25%
+> of the bf16 peak, which is normal for MoE. One nuance: that tuned NVIDIA
+> benchmark spreads experts over 4 nodes (EP32) with optimized all-to-all,
+> so rule 1 is what we measured on the default stack and worth re-testing on
+> the reserved cluster. The alternative use of the 512 GPUs is eight
+> concurrent 64-GPU SFT or PEFT jobs, since NVIDIA's 235B SFT and PEFT
+> recipes each need 64 GPUs. Either way, run the validator on every batch of
+> delivered nodes first, and a short 2-to-64-node scaling ramp to confirm the
+> 90%.
 
 ---
 
@@ -1205,7 +1240,7 @@ DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
 ### A5: Limitations to state openly
 
 - Title: `A5. Limitations to state openly`
-- Bullets, x 0.5, y 1.8, w 12.33, 14 pt:
+- Bullets, x 0.5, y 1.8, w 12.33, 13 pt (seven bullets):
   - Strategy runs use synthetic data for 20 iterations: they measure
     throughput and memory, not convergence (the end-to-end runs cover
     convergence).
@@ -1219,6 +1254,9 @@ DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
   - The PoC used H100 instead of the assignment's H200 because of capacity;
     H100 matches the reservation.
   - The results dashboard is public over plain HTTP with no auth.
+  - EP placement: NVIDIA's tuned H100 benchmark uses EP32 across 4 nodes
+    with optimized all-to-all; our "EP inside a node" rule comes from
+    30B-A3B on the default stack.
 
 ---
 
@@ -1288,6 +1326,19 @@ to double-check any value.
 
 - 512 H100 = 64 nodes. 235B-A22B pretraining: TP4 x PP16 x CP2 x EP8, 128
   GPUs (16 nodes) per replica, DP4. SFT and PEFT: 64 GPUs per job, 8 jobs.
+- Expected scaling efficiency from 2 to 64 nodes: ~90% (5 doublings at
+  ~98% each; 0.98^5 = 0.90, 0.985^5 = 0.93). Expected dense MFU at 64 nodes:
+  ~38% (42% x 0.9).
+
+### 6.6 External references (slides 9 and 14)
+
+| Reference | Number used | Link |
+|---|---|---|
+| Nebius, MLPerf Training v5.0 | Llama 3.1 405B, 512 → 1,024 H200 (64 → 128 nodes, Quantum-2 InfiniBand): 244.6 → 124.5 min, 1.97x for 2x GPUs (98.5% per doubling) | https://nebius.com/blog/posts/industry-leading-ai-training-performance-in-mlperf |
+| Megatron-LM README, strong scaling | GPT-3 175B, same batch, 96 → 4,608 H100: MFU 47% → 42% (89% over 5.6 doublings, ~98% per doubling) | https://github.com/NVIDIA/Megatron-LM |
+| Megatron-LM README, weak scaling | MFU 41% for the smallest (~2B) model, rising to 47-48% for the largest, on H100 | https://github.com/NVIDIA/Megatron-LM |
+| Llama 3 paper, Table 4 | 405B on 8,192-16,384 H100: 38-43% bf16 MFU | https://arxiv.org/abs/2407.21783 |
+| NVIDIA Megatron-Bridge performance archive | Qwen3-235B-A22B, 256 DGX-H100, FP8, TP2 PP8 VP4 EP32: 233-253 TFLOP/s/GPU, ~1,600-1,700 tokens/s/GPU | https://docs.nvidia.com/nemo/megatron-bridge/latest/performance-summary-archive.html |
 
 ---
 
@@ -1309,6 +1360,9 @@ to double-check any value.
 - [ ] Text on lime fills is navy, not white.
 - [ ] Reference lines (400 GB/s, 600 TFLOP/s, 415.3 baseline, 80 GB) sit at
       the right value on their axis.
+- [ ] Slide 9's ceiling bar: lime fill ends at 409 (x 3.06), the dashed tick
+      sits at 700 (x 4.73) and the bar ends at 989 (x 6.4); labels don't
+      overlap.
 - [ ] Slide 11's three panels have the same bar thickness and axis range
       (0-500), and every bar label shows its peak memory.
 - [ ] No accent bars, stripes, gradients, shadows, emoji or stock images.
@@ -1321,4 +1375,4 @@ to double-check any value.
 - [ ] Slide 4 icons are square (not stretched), the same size, and aligned
       with their box titles; boxes without an icon file are text-only.
 - [ ] Spot-check numbers against section 6: 451.5 GB/s, 99.7%, 409 TFLOP/s,
-      41% MFU, 195 s, 683-711 TFLOP/s, 29 experiments.
+      41% MFU, 195 s, 683-711 TFLOP/s, 29 experiments, ~90% at 64 nodes.
