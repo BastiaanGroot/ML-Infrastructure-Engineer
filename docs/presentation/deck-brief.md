@@ -60,6 +60,7 @@ Name the files as below so the mapping is unambiguous.
 | `shot-multinode.png` | Cross-node validator output: 16/16 IB ports ACTIVE and the `all_reduce_perf` table | E1 |
 | `shot-mlflow-runs.png` | MLflow experiment `qwen3-parallelism-experiments`, run list filtered on tag `cluster=2x8-h100-ib` | E2 |
 | `shot-mlflow-e2e-loss.png` | MLflow `e2e-q1p7b` loss chart (one continuous run across the resume) | E2 |
+| `shot-mlflow-autoresume.png` | MLflow `e2e-q1p7b-autoresume` run (one run to iteration 300 across the injected node failure) | E2 |
 | `shot-dashboard-strategy.png` | Streamlit dashboard, strategy comparison tab | E3 |
 | `shot-dashboard-comm.png` | Streamlit dashboard, communication tab (NCCL sweeps + Nsight breakdown) | E3 |
 | `shot-dashboard-planner.png` | Streamlit dashboard, parallelism planner with the predicted-vs-measured table | E3 |
@@ -102,7 +103,7 @@ icons from the Nebius console.
 | Muted text | `97A1A8` | Captions, axis labels, sources, table headers |
 | Neutral series | `8C979F` | Any chart series that is neither NVLink nor InfiniBand |
 | Gridlines / tracks | `1E3547` | Chart gridlines, empty cells in diagrams |
-| Danger (non-brand) | `FF6B6B` | Only for OOM, failure, and the "Job deleted" event on slide 9 |
+| Danger (non-brand) | `FF6B6B` | Only for OOM, failure, and the injected-failure event on slide 9 |
 
 Colour rules:
 
@@ -175,7 +176,7 @@ Apply to every chart unless the slide says otherwise:
 - Data labels that need a different colour or position per series (or only
   on some points) are text boxes laid over the chart, positioned from its
   fixed plot area, because pptxgenjs can't style labels per series. This
-  applies to slides 8, 9 and 13. If you resize or move one of those charts,
+  applies to slides 8, 9 and 12. If you resize or move one of those charts,
   move its label text boxes with it.
 
 ### 2.5 Screenshot placeholders
@@ -264,8 +265,8 @@ Speaker notes:
 
 | # | Question | Answer (key number) | Support line |
 |---|---|---|---|
-| 1 | Can we trust the cluster? | `All checks pass` (use 30 pt so it fits on one line) | 16/16 GPUs at 681-712 TFLOP/s, 451 GB/s across nodes |
-| 2 | Does real training work? | `99.7%` | weak scaling 1 to 2 nodes; loss 12.3 to 3.68 |
+| 1 | Can we trust the cluster? | `All checks pass` (use 30 pt so it fits on one line) | 16/16 GPUs at 683-711 TFLOP/s, 451 GB/s across nodes |
+| 2 | Does real training work? | `99.7%` | weak scaling 1 to 2 nodes; loss 12.3 to 3.68; recovers from an injected node failure in 195 s |
 | 3 | How do we train 100B+? | `29 experiments` (30 pt) | DP, TP, PP, CP, EP, FP8, recompute, offload, profiles |
 
 - Footer: `Source: docs/ML-Infrastructure-Engineer.md (assignment)`
@@ -428,7 +429,7 @@ Speaker notes:
 
 | Area | Choice | Why | Alternative considered |
 |---|---|---|---|
-| Scheduler | Plain Kubernetes Indexed Jobs | One pod per node, torchrun rendezvous via a headless Service; no extra operator to install | Slurm / Soperator, Kubeflow training operator, MPI Operator |
+| Scheduler | Plain Kubernetes Indexed Jobs | One pod per node, torchrun rendezvous via a headless Service; Job retries + elastic rendezvous recover a lost node automatically | Slurm / Soperator, Kubeflow training operator, MPI Operator |
 | Framework | NeMo Megatron-Bridge (Megatron-Core) | TP, PP, CP and EP are first-class config fields, as 100B+ runs need | FSDP2 / DeepSpeed ZeRO: shards memory, but can't split layers or experts |
 | Model | Qwen3, dense 0.6B-32B + MoE 30B-A3B / 235B-A22B | Apache-2.0, NVIDIA recipes, one family covering every strategy plus a real >100B target | Mixing model families across experiments |
 | Storage | Shared FS for shared data, network disk as scratch | Shared FS is 5-8x faster and mounted on every node | Everything on the network disk (not shared, slower) |
@@ -458,8 +459,8 @@ Speaker notes:
     NVLink NCCL, a real Qwen3-0.6B generate + backward, fio on both volumes
   - Across nodes: pre-flight that all 8 IB ports per node are ACTIVE at
     400 Gb/s, then all_reduce over 16 GPUs via mpirun over SSH
-  - H100 thresholds at ~85-90% of measured, so one degraded GPU, NVLink or
-    NIC fails the run
+  - H100 thresholds at ~85-90% of measured, so one slow GPU or degraded
+    NVLink fails the run; a down or slow IB port fails the pre-flight
 - Flow diagram, left to right, area x 0.5 to 12.83, y 3.7 to 6.85 (box
   titles 11 pt bold white, sub-lines 9.5 pt muted):
   - Column A, image box, x 0.5, y 4.3, w 2.3, h 1.6:
@@ -494,9 +495,10 @@ Speaker notes:
 
 > The GEMM check catches a single slow or throttling GPU. That GPU gates
 > every synchronous training step, and it doesn't show up in NCCL numbers.
-> Temperatures are read under load, not at idle. The thresholds are tight on
-> purpose: losing one of eight NICs drops cross-node bandwidth to about
-> 395 GB/s, below the 400 floor, so the run fails.
+> Temperatures are read under load, not at idle. A down or slow InfiniBand
+> port fails the pre-flight with the port's name, before any bandwidth test;
+> the 400 GB/s floors sit 10-15% below the measured values and catch broader
+> degradation.
 
 ---
 
@@ -506,7 +508,7 @@ Speaker notes:
 - Title: `Every check passed on fresh nodes; cross-node bandwidth is within 4%
   of NVLink`
 - Bullets, x 0.5, y 1.75, w 12.33, h 1.15 (14 pt):
-  - 16/16 GPUs healthy and within 4% of each other at 681-712 TFLOP/s bf16,
+  - 16/16 GPUs healthy and within 4% of each other at 683-711 TFLOP/s bf16,
     at the 700 W cap, no throttling
   - NVLink ~467 GB/s per node; 16 GPUs across nodes 451.5 GB/s; 16/16 IB
     ports up
@@ -612,17 +614,18 @@ Speaker notes:
 ### Slide 9: End-to-end run (1.5 min)
 
 - Kicker: `END-TO-END RUN`
-- Title: `Real training works end to end, and resumes cleanly from its last
-  checkpoint`
+- Title: `Real training works end to end, and recovers on its own from an
+  injected node failure`
 - Bullets, x 0.5, y 1.75, w 12.33, h 1.45 (13.5 pt, four lines):
-  - Qwen3-1.7B from scratch on FineWeb-Edu, DP16 across both nodes, about one
-    epoch of 1.05B tokens: 409 TFLOP/s/GPU, 41% MFU
-  - Data tokenized once onto the shared filesystem; checkpoints every 250
-    iterations cost under 1% of the run
-  - Stopped mid-run and relaunched, it picks up the last checkpoint and is
-    training again in 65 s, in the same MLflow run
+  - Qwen3-1.7B from scratch on FineWeb-Edu, DP16 across both nodes, 1.05B
+    tokens (0.7 epoch): 409 TFLOP/s/GPU, 41% MFU
+  - Data tokenized once onto the shared filesystem; four synchronous
+    checkpoints cost about 3.5% of the run
+  - Failure test: we deleted the training pod on one node mid-run;
+    Kubernetes replaced it and training resumed from the last checkpoint in
+    195 s, with no human involved
   - Replayed iterations give identical losses, so data order and optimizer
-    state restore exactly
+    state restore exactly; a manual relaunch takes 65 s
 - Left: native line chart, x 0.5, y 3.3, w 6.0, h 2.55.
   - Title (text box, 12 pt bold white): `Qwen3-1.7B training loss`
   - Categories (iterations): `1`, `50`, `100`, `250`, `500`, `750`, `1000`.
@@ -632,41 +635,47 @@ Speaker notes:
     over the chart (section 2.4).
   - Value axis 0-14, major unit 2, title `Loss`. Category axis title
     `Iteration (unevenly spaced)`. No legend.
-- Right: checkpoint-resume timeline, native shapes, area x 6.8 to 12.83,
-  y 3.3 to 5.85.
-  - Label top-left (11 pt bold white): `Checkpoint and resume (1000-iteration
-    run)`.
-  - Horizontal 2 pt muted line at y 4.75 from x 7.0 (iteration 0) to x 12.6
-    (iteration 1000); x position = 7.0 + iteration x 0.0056.
-  - Diamonds (rotated squares, 0.14 in) at iterations 0 (muted), 250, 500,
-    750, 1000 (lime), with labels below at y 4.9 (10 pt secondary): `start`,
-    `ckpt 250`, `ckpt 500`, `ckpt 750`, `ckpt 1000`.
-  - Red `FF6B6B` vertical tick at iteration 519 (x ≈ 9.91). Its red label
-    sits one row lower than the checkpoint labels (y 5.25), so it doesn't
-    collide with `ckpt 500`: `Job deleted at 519`.
-  - A small lime return hook (up from the 519 tick, left, and down with an
-    arrowhead) back to iteration 501 (x ≈ 9.81), above the line; label
-    above it at y 3.85 (10 pt white, may wrap to two lines):
-    `relaunched: training at 501 after 65 s; 501-519 losses identical`.
-  - Under the timeline at y 5.55 (10 pt muted): `Checkpoints: 22.4 GB, ~17 s
-    each, to the shared filesystem`.
+- Right: injected-failure recovery timeline, native shapes, area x 6.8 to
+  12.83, y 3.3 to 5.85.
+  - Label top-left (11 pt bold white): `Injected node failure, automatic
+    recovery`.
+  - Horizontal 2 pt muted line at y 4.55 from x 7.0 (t = 0 s) to x 12.6
+    (t = 200 s); x position = 7.0 + t x 0.028.
+  - Event dots (0.12 in circles) with short leader lines; labels alternate
+    above and below the line so they don't overlap (10 pt, may wrap to two
+    lines):
+
+    | t (s) | x (in) | Label | Colour | Label position |
+    |---|---|---|---|---|
+    | 0 | 7.0 | node failure injected: pod deleted at iteration 222 | `FF6B6B` | above, left-aligned |
+    | 15 | 7.42 | replacement pod scheduled | `D5D8DB` | below, left-aligned |
+    | 129 | 10.61 | both pods rejoin (elastic rendezvous) | `D5D8DB` | above, left-aligned |
+    | 195 | 12.46 | training again from checkpoint 200, identical losses | `E0FF4F` | below, right-aligned to the dot |
+
+  - Caption under the timeline at y 5.45 (10 pt muted): `300-iteration copy
+    of the same run (e2e-q1p7b-autoresume); checkpoints 22.4 GB, ~17 s each,
+    on the shared filesystem`.
 - Bottom: four key-number panels, y 5.95, h 0.85, w 2.95 each, at x 0.5,
   3.63, 6.76, 9.89 (32 pt bold number, 10.5 pt muted label beside or below):
   1. `1.88 s` (white) / `steady step time`
   2. `409` (lime) / `TFLOP/s per GPU (41% MFU)`
   3. `558k` (white) / `tokens/s, whole cluster`
-  4. `65 s` (lime) / `relaunch to training, from the last checkpoint`
-- Footer: `Source: training/README.md, MLflow e2e-q1p7b; throughput is the
-  steady state of the same config with asynchronous logging.`
+  4. `195 s` (lime) / `injected node failure to training, automatic`
+- Footer: `Source: training/README.md, MLflow e2e-q1p7b and
+  e2e-q1p7b-autoresume; throughput is the steady state of the same config
+  with asynchronous logging.`
 
 Speaker notes:
 
 > This is their daily loop: data tokenized once onto the shared filesystem,
-> cheap checkpoints, and runs that pick up where they left off. The loss drops
-> from 12.3 to 3.7 over one epoch, at 409 TFLOP/s per GPU. We deleted the Job
-> at iteration 519 and relaunched it: it was training again from checkpoint
-> 500 in 65 seconds, in the same MLflow run, and the replayed iterations gave
-> identical losses. So an interruption costs minutes, not the run.
+> checkpoints, and runs that survive a failure. The loss drops from 12.3 to
+> 3.7 over 1.05B tokens, at 409 TFLOP/s per GPU. To test reliability we
+> injected a node failure: we deleted the training pod on one node mid-run.
+> The Kubernetes Job replaced it, torchrun's elastic rendezvous brought both
+> nodes back together, and training resumed from the last checkpoint in 195
+> seconds, with no human involved. The replayed iterations gave identical
+> losses, so nothing about the run changed. A manual relaunch after stopping
+> the whole Job takes 65 seconds.
 
 ---
 
@@ -722,10 +731,10 @@ Speaker notes:
   degree that fits`
 - No bullet block on the slide; the three panel answers and the four key
   numbers carry the message.
-- One-line intro, x 0.5, y 1.75, w 12.33, h 0.4 (13 pt secondary):
+- Intro, x 0.5, y 1.75, w 12.33, h 0.45 (13 pt secondary, two lines):
   `Same model, same 80 GB GPU. Each bar changes one thing from the TP2 x DP8
   baseline, the fastest layout that fits. Labels: layout · peak memory per
-  GPU.`
+  GPU. MFU = TFLOP/s per GPU / 989 (H100 bf16 peak); 415 TFLOP/s = 42%.`
 - Three panels, one question each: y 2.2, h 3.75, w 3.93, at x 0.5, 4.7
   and 8.9. Inside each panel, top to bottom:
   - Question heading (13 pt bold white), panel top + 0.15.
@@ -759,11 +768,11 @@ Speaker notes:
 |---|---|---|
 | FP8 · 47 GB | 426.6 | lime |
 | Baseline · 49 GB | 415.3 | neutral `8C979F` (reference) |
-| DP16 + recompute · 66 GB | 368.2* | lime |
+| DP16 + recompute · 66 GB | 368.2 | lime |
 | Unfused attention · 69 GB | 309.0 | lime |
 | CPU offload · 41 GB | 126.9 | lime |
 
-- Muted footnote: `*Recompute counts the extra forward pass`
+- Muted note: `Recompute lets DP16 fit, at a 13% longer step`
 - Answer: `Only FP8 helps (+2%); keep fused attention`
 
 **Panel 3, heading `Long context? (seq 16k)`**
@@ -777,7 +786,7 @@ Speaker notes:
 - Answer: `CP2 is 7% faster than TP4`
 
 The two TP8 node-placement runs (TP8 within one node, TP8 split 4 + 4) are
-not on this slide; they are on slide 13 and in A1.
+not on this slide; they are on slide 12 and in A1.
 
 - Bottom: four key-number panels, y 6.05, h 0.75, w 2.95 each, at x 0.5,
   3.63, 6.76, 9.89. Number 26 pt bold, label 10.5 pt muted to its right:
@@ -806,50 +815,7 @@ Speaker notes:
 
 ---
 
-### Slide 12: MoE and 32B (1 min)
-
-- Kicker: `MOE AND 32B`
-- Title: `Keep expert and tensor parallelism inside a node; cross nodes with
-  pipeline and data parallelism`
-- Bullets, x 0.5, y 1.75, w 12.33, h 1.2 (15 pt):
-  - MoE all-to-all can't overlap with compute, so EP across nodes is 2.6x
-    slower
-  - 32B needs ~525 GB of weights, grads and Adam state, so it must be sharded
-    over 8+ GPUs
-  - NVIDIA's TP8 x PP2 recipe leaves no DP on 16 GPUs; TP4 x PP2 x DP2 is 39%
-    faster
-- Two panels side by side, y 3.15, h 3.6, w 6.0 each, at x 0.5 and 6.83.
-  Each panel holds a heading, a native horizontal bar chart and a takeaway
-  line.
-  - Left panel heading (13 pt bold white):
-    `Qwen3-30B-A3B (MoE): seconds per step, lower is better`
-    - Chart: categories `EP8, all-to-all in node` (3.71, lime `E0FF4F`) and
-      `EP16, across nodes` (9.52, indigo `614EFA`). Value axis 0-10, data
-      labels `0.00" s"`.
-    - Takeaway (12 pt secondary): `EP8: 101.6 TFLOP/s/GPU at 62.1 GB. EP16
-      saves 9 GB/GPU but is 2.6x slower.`
-    - Small print (10 pt muted): `TP1, DP16, global batch 64`
-  - Right panel heading: `Qwen3-32B (3D parallelism): seconds per step,
-    lower is better`
-    - Chart: categories `TP4 x PP2 x DP2` (10.64, lime) and
-      `TP8 x PP2 (NVIDIA recipe)` (14.84, neutral `8C979F`). Value axis 0-16.
-    - Takeaway: `TP4 x PP2 x DP2: 315.3 TFLOP/s/GPU at 53.0 GB. The recipe
-      fits in 40.2 GB but leaves no DP, so it's 39% slower.`
-    - Small print: `Global batch 64`
-- Footer: `Source: training/README.md`
-
-Speaker notes:
-
-> Expert parallelism's all-to-all can't overlap with compute, so pushing it
-> across nodes costs 2.6x for only 9 GB of memory saved per GPU. For 32B,
-> NVIDIA's recipe is TP8 x PP2, which on 16 GPUs leaves no data parallelism;
-> TP4 x PP2 x DP2 fits and is 39% faster. NVIDIA's 235B-A22B recipe is shaped
-> the same way, with EP8 on 8-GPU nodes. Low MoE MFU is expected at
-> micro-batch 1, because each expert sees few tokens.
-
----
-
-### Slide 13: Profiling (1 min)
+### Slide 12: Profiling (1 min)
 
 - Kicker: `PROFILING`
 - Title: `Nsight shows why: extra TP turns GEMM time into communication time`
@@ -889,12 +855,57 @@ Speaker notes:
 
 Speaker notes:
 
-> This is the kernel-level evidence behind "smallest TP that fits". With TP2
-> on NVLink, almost half the GPU time is useful matrix math. With TP8 split
-> across nodes, nearly two thirds is communication: each all-reduce takes
-> about four times longer, and there are three quarters of a million of them.
-> Profiling overhead was +5% on the baseline and +37% on TP8. These profiles
-> are from the first round; the code paths haven't changed.
+> This is the kernel-level evidence behind the previous slide's "smallest TP
+> that fits". With TP2 on NVLink, almost half the GPU time is useful matrix
+> math. With TP8 split across nodes, nearly two thirds is communication: each
+> all-reduce takes about four times longer, and there are three quarters of a
+> million of them. Profiling overhead was +5% on the baseline and +37% on
+> TP8. These profiles are from the first round; the code paths haven't
+> changed.
+
+---
+
+### Slide 13: MoE and 32B (1 min)
+
+- Kicker: `MOE AND 32B`
+- Title: `Keep expert and tensor parallelism inside a node; cross nodes with
+  pipeline and data parallelism`
+- Bullets, x 0.5, y 1.75, w 12.33, h 1.2 (15 pt):
+  - MoE all-to-all can't overlap with compute, so EP across nodes is 2.6x
+    slower
+  - 32B needs ~525 GB of weights, grads and Adam state, so it must be sharded
+    over 8+ GPUs
+  - NVIDIA's TP8 x PP2 recipe leaves no DP on 16 GPUs; TP4 x PP2 x DP2 is 39%
+    faster
+- Two panels side by side, y 3.15, h 3.6, w 6.0 each, at x 0.5 and 6.83.
+  Each panel holds a heading, a native horizontal bar chart and a takeaway
+  line.
+  - Left panel heading (13 pt bold white):
+    `Qwen3-30B-A3B (MoE): seconds per step, lower is better`
+    - Chart: categories `EP8, all-to-all in node` (3.71, lime `E0FF4F`) and
+      `EP16, across nodes` (9.52, indigo `614EFA`). Value axis 0-10, data
+      labels `0.00" s"`.
+    - Takeaway (12 pt secondary): `EP8: 101.6 TFLOP/s/GPU at 62.1 GB. EP16
+      saves 9 GB/GPU but is 2.6x slower.`
+    - Small print (10 pt muted): `TP1, DP16, global batch 64`
+  - Right panel heading: `Qwen3-32B (3D parallelism): seconds per step,
+    lower is better`
+    - Chart: categories `TP4 x PP2 x DP2` (10.64, lime) and
+      `TP8 x PP2 (NVIDIA recipe)` (14.84, neutral `8C979F`). Value axis 0-16.
+    - Takeaway: `TP4 x PP2 x DP2: 315.3 TFLOP/s/GPU at 53.0 GB. The recipe
+      fits in 40.2 GB but leaves no DP, so it's 39% slower.`
+    - Small print: `Global batch 64`
+- Footer: `Source: training/README.md`
+
+Speaker notes:
+
+> Expert parallelism's all-to-all can't overlap with compute, so pushing it
+> across nodes costs 2.6x for only 9 GB of memory saved per GPU. For 32B,
+> NVIDIA's recipe is TP8 x PP2, which on 16 GPUs leaves no data parallelism;
+> TP4 x PP2 x DP2 fits and is 39% faster. NVIDIA's 235B-A22B recipe is shaped
+> the same way, with EP8 on 8-GPU nodes, which leads straight into the
+> 512-GPU plan. Low MoE MFU is expected at micro-batch 1, because each expert
+> sees few tokens.
 
 ---
 
@@ -1035,10 +1046,12 @@ uploaded, draw the placeholder (section 2.5).
 - Title: `Every run is tracked in MLflow, including across restarts`
 - Placeholder left, x 0.5, y 1.8, w 6.05, h 5.0: `SCREENSHOT: MLflow run
   list, tag cluster=2x8-h100-ib` (`shot-mlflow-runs.png`).
-- Placeholder right, x 6.78, y 1.8, w 6.05, h 5.0: `SCREENSHOT: e2e-q1p7b
-  loss chart` (`shot-mlflow-e2e-loss.png`).
-- Notes: `One MLflow run survives the resume, so the loss curve is
-  continuous.`
+- Two stacked placeholders right, x 6.78, w 6.05, h 2.4, at y 1.8 and 4.4:
+  `SCREENSHOT: e2e-q1p7b loss chart` (`shot-mlflow-e2e-loss.png`) and
+  `SCREENSHOT: e2e-q1p7b-autoresume run to iteration 300`
+  (`shot-mlflow-autoresume.png`).
+- Notes: `One MLflow run survives both the manual relaunch and the injected
+  node failure, so the loss curve is continuous.`
 
 ### E3: Results dashboard
 
@@ -1082,13 +1095,13 @@ These are for Q&A; speaker notes are optional one-liners.
 | q8b-baseline | TP2 x DP8 (baseline) | 1.93 s | 415.3 | 42.0% | 49.2 GB |
 | q8b-baseline-1node | TP2 x DP4, one node | 1.93 s | 416.6 | 42.1% | 55.3 GB |
 | q8b-dp16 | DP16 | - | OOM | - | OOM |
-| q8b-dp16-recompute | DP16 + full recompute | 2.18 s | 368.2 | 37.2%* | 65.5 GB |
+| q8b-dp16-recompute | DP16 + full recompute | 2.18 s | 368.2 | 37.2% | 65.5 GB |
 | q8b-tp4-dp4 | TP4 x DP4 | 2.59 s | 311.0 | 31.4% | 30.2 GB |
 | q8b-tp8-dp2 | TP8 x DP2 | 4.96 s | 162.0 | 16.4% | 20.7 GB |
 | q8b-tp8-1node | TP8, one node | 9.71 s | 165.5 | 16.7% | 26.8 GB |
 | q8b-tp8-2nodes | TP8 split 4 + 4 | 10.08 s | 159.5 | 16.1% | 26.8 GB |
 | q8b-pp2 | TP2 x PP2 x DP4 | 2.30 s | 350.1 | 35.4% | 33.2 GB |
-| q8b-fp8 | FP8 (current scaling) | 1.90 s | 426.6 | 43.1%** | 47.2 GB |
+| q8b-fp8 | FP8 (current scaling) | 1.90 s | 426.6 | 43.1%* | 47.2 GB |
 | q8b-unfused-attn | Unfused attention | 2.60 s | 309.0 | 31.2% | 69.4 GB |
 | q8b-cpu-offload | Activation CPU offload | 6.33 s | 126.9 | 12.8% | 40.5 GB |
 | q8b-seq16k-baseline | TP2 x DP8, seq 16k | - | OOM | - | OOM |
@@ -1097,8 +1110,9 @@ These are for Q&A; speaker notes are optional one-liners.
 
 - Caption (10 pt muted): `Micro-batch 1, global batch 64, seq 4096 (global
   batch 32 at seq 16384; the 1-node run uses global batch 32 for the same
-  per-GPU work). *Includes recomputed forward. **Against the bf16 peak; 22%
-  of the FP8 peak. MFU = TFLOP/s per GPU / 989 (H100 dense bf16).`
+  per-GPU work). *Against the bf16 peak; 22% of the FP8 peak. MFU = TFLOP/s
+  per GPU / 989 (H100 dense bf16); model FLOPs, so recompute's repeated
+  forward pass isn't counted.`
 
 ### A2: Qwen3-1.7B, DP vs TP vs PP
 
@@ -1137,7 +1151,8 @@ These are for Q&A; speaker notes are optional one-liners.
   `average, threshold 400`; `16/16` (white) / `IB ports ACTIVE at 400 Gb/s`;
   `0` (white) / `out-of-bounds values`.
 - Caption: `Out-of-place bus bandwidth per message size, image v9 on fresh
-  nodes. Source: cluster-validator/README.md`
+  nodes. The 451.5 GB/s average is nccl-tests' own, which also includes the
+  in-place runs. Source: cluster-validator/README.md`
 
 ### A4: Parallelism planner vs measured runs
 
@@ -1264,7 +1279,7 @@ to double-check any value.
 |---|---|
 | GPUs | 2 nodes x 8 H100 SXM 80 GB, fabric-4 |
 | Idle temperature / ECC / row remaps | 26 °C (node 1), 28 °C (node 2); 0 ECC; 0 remaps |
-| bf16 GEMM per GPU (8192³, 30 s, all 8 at once) | Node 1 683-708, node 2 691-711 TFLOP/s; across runs 681-712 (within 4%) |
+| bf16 GEMM per GPU (8192³, 30 s, all 8 at once) | Node 1 683-708, node 2 691-711 TFLOP/s (within 4%, used on the slides); across runs 681-712 |
 | Max temperature under load / slowdown | 61 °C / 64 °C, no slowdown reasons, 700 W cap |
 | NVLink all_reduce (8 GPUs) | 467.9 / 466.0 GB/s |
 | IB ports | 16/16 ACTIVE at 400 Gb/s |
@@ -1272,7 +1287,7 @@ to double-check any value.
 | Network disk read / write | 219 / 223 MB/s |
 | Shared filesystem read / write | 1309 / 1310 MB/s (node 1), 1346 / 1346 MB/s (node 2); 1.2-1.7 GB/s across runs |
 | Thresholds | 8 GPUs; NCCL 400 GB/s per node and across nodes; GEMM 600 TFLOP/s and ≥ 90% of node median |
-| One NIC lost | 7/8 x 451 ≈ 395 GB/s, below 400 (fails) |
+| Down or slow NIC | Fails the IB pre-flight (8 ports ACTIVE at ≥ 400 Gb/s per node); the bandwidth effect of losing one NIC wasn't measured |
 
 ### 6.2 NCCL sweep (`training/README.md`, nccl-* experiments, first round)
 
@@ -1283,17 +1298,19 @@ to double-check any value.
 | 256 MiB | 424.4 | 381.4 | 45.3 |
 | 1 GiB | 468.0 | 442.4 | 46.3 |
 
-### 6.3 End-to-end training (`training/README.md`, MLflow `e2e-q1p7b`)
+### 6.3 End-to-end training (`training/README.md`, MLflow `e2e-q1p7b`, `e2e-q1p7b-autoresume`)
 
 | Metric | Value |
 |---|---|
-| Model / data | Qwen3-1.7B from scratch, FineWeb-Edu, 1.49B tokens prepared (5.6 GB, 5 min), 1.05B trained |
+| Model / data | Qwen3-1.7B from scratch, FineWeb-Edu, 1.49B tokens prepared (5.6 GB, 5 min), 1.05B trained (0.7 epoch) |
 | Layout | DP16, 2 nodes, 256 x 4096 tokens per step, 1000 iterations |
 | Loss | 12.32 (1), 7.27 (50), 6.53 (100), 5.35 (250), 4.24 (500), 3.86 (750), 3.68 (1000) |
 | Throughput | 1.88 s per step, 409 TFLOP/s/GPU, 41% MFU, 34.9k tokens/s/GPU, 558k tokens/s cluster, 44.3 GB peak (steady state of the same config with asynchronous logging, measured in the later `e2e-q1p7b-autoresume` run) |
 | Original 1000-iteration run (Q&A only) | Logged 2.09 s / 368 TFLOP/s because of a blocking MLflow call per step, since fixed |
-| Checkpoints | 22.4 GB, ~17 s each, every 250 iterations, shared filesystem |
+| Checkpoints | 22.4 GB, ~17 s each, every 250 iterations, shared filesystem; synchronous, so the four saves (68 s) cost about 3.5% of the run |
 | Manual resume | Job deleted at 519, training at 501 after 65 s, losses 501-519 identical (4.231, 4.169) |
+| Injected node failure | `e2e-q1p7b-autoresume`, 300 iterations, checkpoint every 100. Pod on one node deleted at iteration 222: +15 s replacement pod scheduled, +129 s both pods rejoin (elastic rendezvous), +195 s training again (iteration 204) from checkpoint 200; iterations 201-222 replayed with identical losses (5.782 at 201, 5.664 at 222). Mechanism: Job `backoffLimit` 6 + torchrun elastic c10d rendezvous |
+
 ### 6.4 Strategy experiments (`training/README.md`)
 
 - Qwen3-8B: see A1. Derived: weak scaling 415.3 / 416.6 = 99.7%; TP2 to TP8
@@ -1329,12 +1346,12 @@ to double-check any value.
       the edges; 0.5 in margins respected.
 - [ ] No text smaller than 10 pt (9 pt only in the diagram labels that say
       so).
-- [ ] No overlapping elements: resume-timeline labels on slide 9, chart
+- [ ] No overlapping elements: recovery-timeline labels on slide 9, chart
       labels on slides 8 and 11, and diagram connectors on slides 4 and 6.
 - [ ] Charts are native and editable (not images), with the specified data,
       colours, axis ranges and axis titles.
 - [ ] Colour key holds everywhere: lime = inside a node / key number,
-      indigo = across nodes, red only for OOM / failure / Job deleted.
+      indigo = across nodes, red only for OOM / failure / injected failure.
 - [ ] Text on lime fills is navy, not white.
 - [ ] Reference lines (400 GB/s, 600 TFLOP/s, 415.3 baseline, 80 GB) sit at
       the right value on their axis.
@@ -1350,4 +1367,4 @@ to double-check any value.
 - [ ] Slide 4 icons are square (not stretched), the same size, and aligned
       with their box titles; boxes without an icon file are text-only.
 - [ ] Spot-check numbers against section 6: 451.5 GB/s, 99.7%, 409 TFLOP/s,
-      41% MFU, 65 s, 681-712 TFLOP/s, 29 experiments.
+      41% MFU, 195 s, 683-711 TFLOP/s, 29 experiments.
