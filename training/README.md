@@ -85,15 +85,16 @@ kubectl logs -f job/prepare-data
    the shared filesystem: 1.49B tokens, 5.6 GB. It takes 5 minutes on
    64 CPU cores of one GPU node.
 2. **Training**: global batch 256 x 4096 tokens, 1000 iterations (1.05B
-   tokens, about one epoch), 50 warmup iterations, cosine decay from
+   tokens, about 0.7 epoch of the 1.49B), 50 warmup iterations, cosine decay from
    3e-4 to 3e-5. Both nodes read the dataset from the shared filesystem.
    The loss is logged to MLflow live from the last rank (tag
    `run_kind=e2e`).
 3. **Checkpoints**: every 250 iterations to
    `/mnt/shared-fs/checkpoints/e2e-q1p7b` (Megatron `torch_dist` format,
    every rank writes its shard in parallel). Each is 22.4 GB (bf16 weights
-   plus fp32 master weights and Adam states) and takes about 17 s, less than
-   1% of the run at this interval.
+   plus fp32 master weights and Adam states) and takes about 17 s. Saves
+   are synchronous, so the four of them (68 s) cost about 3.5% of the run
+   at this interval.
 4. **Failure and resume**: the Job was deleted at iteration 519, 19
    iterations after the iteration-500 checkpoint, to simulate a node
    failure. Re-running `./launch.py e2e-q1p7b` loaded that checkpoint and
@@ -205,22 +206,24 @@ the long-sequence rows).
 | `q8b-baseline` | TP2 x DP8 | 1.93 s | **415.3** | 42.0% | 49.2 GB |
 | `q8b-baseline-1node` | TP2 x DP4, one node, global batch 32 | 1.93 s | 416.6 | 42.1% | 55.3 GB |
 | `q8b-dp16` | DP16 | - | - | - | **OOM** |
-| `q8b-dp16-recompute` | DP16 + full recompute | 2.18 s | 368.2* | 37.2%* | 65.5 GB |
+| `q8b-dp16-recompute` | DP16 + full recompute | 2.18 s | 368.2 | 37.2% | 65.5 GB |
 | `q8b-tp4-dp4` | TP4 x DP4 | 2.59 s | 311.0 | 31.4% | 30.2 GB |
 | `q8b-tp8-dp2` | TP8 x DP2 | 4.96 s | 162.0 | 16.4% | 20.7 GB |
 | `q8b-tp8-1node` | TP8, one node (8 GPUs) | 9.71 s | 165.5 | 16.7% | 26.8 GB |
 | `q8b-tp8-2nodes` | TP8 split 4 + 4 across nodes | 10.08 s | 159.5 | 16.1% | 26.8 GB |
 | `q8b-pp2` | TP2 x PP2 x DP4 | 2.30 s | 350.1 | 35.4% | 33.2 GB |
-| `q8b-fp8` | FP8 (current scaling) | 1.90 s | **426.6** | 43.1%** | 47.2 GB |
+| `q8b-fp8` | FP8 (current scaling) | 1.90 s | **426.6** | 43.1%* | 47.2 GB |
 | `q8b-unfused-attn` | unfused attention | 2.60 s | 309.0 | 31.2% | 69.4 GB |
 | `q8b-cpu-offload` | activation CPU offload | 6.33 s | 126.9 | 12.8% | 40.5 GB |
 | `q8b-seq16k-baseline` | TP2 x DP8, seq 16384 | - | - | - | **OOM** |
 | `q8b-seq16k-cp2` | TP2 x CP2 x DP4, seq 16384 | 4.46 s | **439.8** | 44.5% | 66.7 GB |
 | `q8b-seq16k-tp4` | TP4 x DP4, seq 16384 | 4.77 s | 411.8 | 41.6% | 63.8 GB |
 
-\* Megatron counts the recomputed forward pass, so this overstates useful
-work. Compare step times instead: 2.18 s versus 1.93 s.
-\** Against the bf16 peak; against H100's ~1979 TFLOP/s FP8 peak it's 22%.
+\* Against the bf16 peak; against H100's ~1979 TFLOP/s FP8 peak it's 22%.
+
+Megatron's FLOP count is model FLOPs: it doesn't count the forward pass that
+full recompute repeats. The recompute row's 368.2 TFLOP/s is the baseline's
+415.3 scaled by step time (1.93 s / 2.18 s), so it's useful work.
 
 What this shows:
 

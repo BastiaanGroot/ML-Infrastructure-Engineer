@@ -91,8 +91,8 @@ The script defaults are deliberately generic; the Job YAMLs set acceptance
 thresholds for this cluster's 8x H100 nodes at ~85-90% of the measured
 values (`EXPECTED_GPU_COUNT=8`, `GPU_MIN_TFLOPS=600`,
 `NCCL_MIN_BUSBW_GBPS=400`, `NCCL_MULTINODE_MIN_BUSBW_GBPS=400`), so a single
-slow GPU or degraded NVLink/InfiniBand NIC fails the run instead of passing
-a loose floor.
+slow GPU or degraded NVLink fails the run instead of passing a loose floor.
+A down or slow InfiniBand port is caught by the cross-node pre-flight.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -248,8 +248,9 @@ out-of-bounds values:
   Across both nodes, all 16 GPUs reach 446 GB/s at 1 GiB, within a few
   percent of NVLink, because NCCL uses all 8 InfiniBand NICs per node. This
   matches the training NCCL sweep's 442 GB/s (see
-  [`training/README.md`](../training/README.md#nccl-bandwidth)). The 400 GB/s
-  thresholds sit ~10-15% below that, so one degraded link fails the run.
+  [`training/README.md`](../training/README.md#nccl-bandwidth)). A down or
+  slow InfiniBand port fails the IB pre-flight; the 400 GB/s thresholds sit
+  ~10-15% below the measured values and catch broader degradation.
 - **LLM smoketest**: a real Qwen3-0.6B checkpoint (same model family as
   [`training/`](../training/README.md)) generates 20 tokens and completes a
   forward and backward pass on GPU, so the PyTorch/CUDA/Transformers stack
