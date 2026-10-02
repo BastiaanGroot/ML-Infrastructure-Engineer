@@ -41,7 +41,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_GPU_TEMP{instance_id=~\"$node\"}",
+          "expr": "max by (instance_id, uuid) (DCGM_FI_DEV_GPU_TEMP{instance_id=~\"$node\"})",
           "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
@@ -54,7 +54,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_GPU_UTIL{instance_id=~\"$node\"}",
+          "expr": "max by (instance_id, uuid) (DCGM_FI_DEV_GPU_UTIL{instance_id=~\"$node\"})",
           "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
@@ -67,7 +67,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "DCGM_FI_DEV_POWER_USAGE{instance_id=~\"$node\"}",
+          "expr": "max by (instance_id, uuid) (DCGM_FI_DEV_POWER_USAGE{instance_id=~\"$node\"})",
           "legendFormat": "{{instance_id}} gpu {{uuid}}"
         }
       ]
