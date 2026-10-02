@@ -266,7 +266,7 @@ Speaker notes:
 | # | Question | Answer (key number) | Support line |
 |---|---|---|---|
 | 1 | Can we trust the cluster? | `All checks pass` (use 30 pt so it fits on one line) | 16/16 GPUs at 683-711 TFLOP/s, 451 GB/s across nodes |
-| 2 | Does real training work? | `99.7%` | weak scaling 1 to 2 nodes; loss 12.3 to 3.68; recovers from an injected node failure in 195 s |
+| 2 | Does real training work? | `41% MFU` | 409 TFLOP/s/GPU on real data across both nodes; loss 12.3 to 3.68; recovers from an injected node failure in 195 s |
 | 3 | How do we train 100B+? | `29 experiments` (30 pt) | DP, TP, PP, CP, EP, FP8, recompute, offload, profiles |
 
 - Footer: `Source: docs/ML-Infrastructure-Engineer.md (assignment)`
@@ -885,15 +885,15 @@ Speaker notes:
     - Chart: categories `EP8, all-to-all in node` (3.71, lime `E0FF4F`) and
       `EP16, across nodes` (9.52, indigo `614EFA`). Value axis 0-10, data
       labels `0.00" s"`.
-    - Takeaway (12 pt secondary): `EP8: 101.6 TFLOP/s/GPU at 62.1 GB. EP16
-      saves 9 GB/GPU but is 2.6x slower.`
+    - Takeaway (12 pt secondary): `EP8: 101.6 TFLOP/s/GPU (10.3% MFU) at
+      62.1 GB. EP16 saves 9 GB/GPU but is 2.6x slower.`
     - Small print (10 pt muted): `TP1, DP16, global batch 64`
   - Right panel heading: `Qwen3-32B (3D parallelism): seconds per step,
     lower is better`
     - Chart: categories `TP4 x PP2 x DP2` (10.64, lime) and
       `TP8 x PP2 (NVIDIA recipe)` (14.84, neutral `8C979F`). Value axis 0-16.
-    - Takeaway: `TP4 x PP2 x DP2: 315.3 TFLOP/s/GPU at 53.0 GB. The recipe
-      fits in 40.2 GB but leaves no DP, so it's 39% slower.`
+    - Takeaway: `TP4 x PP2 x DP2: 315.3 TFLOP/s/GPU (31.9% MFU) at 53.0 GB.
+      The recipe fits in 40.2 GB but leaves no DP, so it's 39% slower.`
     - Small print: `Global batch 64`
 - Footer: `Source: training/README.md`
 
@@ -1130,7 +1130,9 @@ These are for Q&A; speaker notes are optional one-liners.
   PP2 x DP8 223.4 (neutral). Axis 0-400.
 - Caption: `A model this small fits on one GPU, so plain DP wins; TP and PP
   only buy memory it doesn't need. PP memory is the max over ranks (the stage
-  holding the logits).`
+  holding the logits). Synthetic data at global batch 32; the end-to-end run
+  (slide 9) reaches 41% MFU with the same layout because global batch 256
+  gives more micro-batches to overlap DP communication with.`
 
 ### A3: Cross-node validator sweep
 
