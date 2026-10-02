@@ -8,7 +8,7 @@ file alone, without access to the repo. Every number comes from the
 `cluster-validator/README.md`.
 
 Structure: 15 core slides (about 15 minutes), 4 optional evidence slides for
-screenshots, and 9 appendix slides for Q&A.
+screenshots, and 5 appendix slides for Q&A.
 
 ---
 
@@ -30,7 +30,7 @@ from the attached brief, deck-brief.md. Follow it exactly:
 - Use the design system in section 2 on every slide (navy background, panel
   colours, lime/indigo roles, Arial, sizes, margins). No accent bars, stripes,
   gradients, shadows, emoji or clip art.
-- Build slides 1-15, E1-E4 and A1-A9 in order, with the exact titles, bullets,
+- Build slides 1-15, E1-E4 and A1-A5 in order, with the exact titles, bullets,
   table contents and speaker notes given. Speaker notes go in via
   slide.addNotes().
 - Build every chart as a native, editable pptxgenjs chart (addChart) with the
@@ -443,7 +443,10 @@ Speaker notes:
 > Megatron-Bridge is the key choice. FSDP and ZeRO shard memory, but they
 > can't split a layer, a stack of layers, a sequence or the experts, and a
 > 100B+ model needs all four. Plain Kubernetes Jobs were enough at two nodes;
-> managed Soperator is the natural move once many users share the GPUs.
+> managed Soperator is the natural move once many users share the GPUs. If
+> asked why not MLPerf: its fixed reference models, datasets and submission
+> process don't fit a lightweight, portable validator, so we reuse its metric
+> definitions (throughput per GPU, time-to-train) to keep numbers comparable.
 
 ---
 
@@ -1063,8 +1066,12 @@ uploaded, draw the placeholder (section 2.5).
   predicted vs measured` (`shot-dashboard-planner.png`).
 - Caption under each (10 pt muted): `Compare layouts`, `See where time
   goes`, `Plan a new model`.
-- Notes: `The planner ranks TP x PP x DP layouts for a new model and shows
-  its prediction next to the measured MLflow runs.`
+- Notes: `The planner is an analytical model that ranks TP x PP x DP layouts
+  for a new model (memory: weights, grads, sharded optimizer, activations;
+  time: compute, communication over the slowest link, pipeline bubble) and
+  shows its prediction next to the measured MLflow runs. On the 8B and 32B
+  runs it ranks layouts correctly, but underestimates TP8's cost by about 2x
+  (it assumes constant MFU) and memory by up to about 27%.`
 
 ### E4: Nebius console
 
@@ -1079,7 +1086,7 @@ uploaded, draw the placeholder (section 2.5).
 
 ---
 
-## 5. Appendix slides (A1-A9)
+## 5. Appendix slides (A1-A5)
 
 Kicker `APPENDIX`. Same grid and styling as the core slides. Tables 11-12 pt.
 These are for Q&A; speaker notes are optional one-liners.
@@ -1134,101 +1141,9 @@ These are for Q&A; speaker notes are optional one-liners.
   (slide 9) reaches 41% MFU with the same layout because global batch 256
   gives more micro-batches to overlap DP communication with.`
 
-### A3: Cross-node validator sweep
+### A3: NVIDIA Megatron-Bridge Qwen3 H100 recipes
 
-- Title: `A3. Cross-node validator sweep: 16 GPUs over InfiniBand`
-- Native horizontal bar chart, x 0.5, y 1.8, w 8.0, h 4.2, all bars indigo
-  `614EFA`, value axis 0-500, dashed reference line at 400 (`threshold
-  400 GB/s`), data labels `0.0`:
-
-| Message size | Bus bandwidth (GB/s) |
-|---|---|
-| 512 MiB | 414.2 |
-| 1 GiB | 445.8 |
-| 2 GiB | 458.9 |
-| 4 GiB | 464.4 |
-| 8 GiB | 469.2 |
-
-- Right, key numbers stacked (x 8.9, w 3.93): `451.5 GB/s` (lime) /
-  `average, threshold 400`; `16/16` (white) / `IB ports ACTIVE at 400 Gb/s`;
-  `0` (white) / `out-of-bounds values`.
-- Caption: `Out-of-place bus bandwidth per message size, image v9 on fresh
-  nodes. The 451.5 GB/s average is nccl-tests' own, which also includes the
-  in-place runs. Source: cluster-validator/README.md`
-
-### A4: Parallelism planner vs measured runs
-
-- Title: `A4. The planner ranks layouts correctly, but is optimistic about
-  TP8`
-- Two text panels side by side (y 1.8, h 3.2, w 6.0 each), 13 pt:
-  - `How it works`: `An analytical model ranks TP x PP x DP layouts for a
-    model, cluster and link bandwidth. Memory: bf16 weights, fp32 grads,
-    sharded optimizer, activations with optional recompute. Time: compute at
-    a given MFU, TP/PP/DP communication over the slowest link each group
-    spans, and the 1F1B bubble.`
-  - `How well it matches`: `On the measured 8B and 32B runs it ranks layouts
-    correctly, but underestimates TP8's cost by about 2x (it assumes constant
-    MFU) and memory by up to about 27%. The comparison table now reads the
-    measured runs live from MLflow.`
-- Optional screenshot placeholder below (y 5.2, h 1.6, full width):
-  `SCREENSHOT: planner predicted-vs-measured table`.
-- Footer: `Source: dashboard/recommender.py`
-
-### A5: Observability pipeline and queries
-
-- Title: `A5. Observability: Nebius-hosted logs and GPU metrics, read by
-  Grafana`
-- Top: small flow of four boxes in a row (y 1.8, h 0.8): `Pods (stdout)` and
-  `DCGM receiver (in the Observability Agent)` -> `Observability Agent` ->
-  two targets `Nebius Logging (LogQL)` and `"Nebius Services" Prometheus
-  datasource (label instance_id)` -> `Grafana (preinstalled)`.
-- Text (13 pt): `GPU metrics come from the agent's built-in DCGM receiver and
-  land in the "Nebius Services" Prometheus datasource, not "Nebius
-  Monitoring".`
-- Code box (panel, Consolas 11 pt, x 0.5, y 3.6, w 12.33, h 2.0):
-
-```text
-# check results only
-{__bucket__="default", k8s_job_name=~"cluster-validator.*"}
-  |~ "\\[(gpu_health|gpu_compute|nccl_bench|llm_smoketest|storage_bench|nccl_multinode)\\] |RESULT:"
-
-# GPU temperature per node
-DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
-```
-
-- Caption: `Limits: no alerting on LogQL-derived values; 14-day log
-  retention by default (hence the Object Storage copy). Source:
-  docs/observability.md`
-
-### A6: IAM and secrets
-
-- Title: `A6. IAM and secrets are fully in Terraform, with no manual steps`
-- Table, full width, column widths 3.6 / 8.73:
-
-| Need | How |
-|---|---|
-| GPU nodes pull the validator image | gpu-nodes-sa in a registry-readers group with viewer on the registry; no pull secret to expire |
-| MLflow reaches its bucket | mlflow-sa in a project-scoped group with editor on the project (was tenant-wide) |
-| MLflow admin password | Terraform random_password stored in SecretStash; read by the training Secret, the dashboard VM and humans |
-| Validator writes to the logs bucket | Service account in an IAM group; bucket_policy grants storage.editor to the group (buckets only accept groups) |
-| S3 access key | Created once with --secret-delivery-mode mystery_box, so the plaintext never appears in a terminal |
-| Dashboard exposure | Own security group: only port 80 (and 22 if a key is set); the default VPC group allows all ingress |
-
-- Footer: `Source: infra/README.md`
-
-### A7: Why not the MLPerf suite
-
-- Title: `A7. MLPerf metric definitions, not the MLPerf suite`
-- Single panel, x 0.5, y 1.8, w 12.33, h 2.0, 15 pt: `MLPerf's fixed
-  reference models, datasets and submission/compliance process don't fit a
-  lightweight, portable validator or this PoC's scope. The PoC reuses its
-  metric definitions instead (throughput per accelerator, time-to-train), so
-  the numbers stay comparable in industry terms.`
-- Footer: `Source: README.md`
-
-### A8: NVIDIA Megatron-Bridge Qwen3 H100 recipes
-
-- Title: `A8. NVIDIA's Qwen3 recipes on H100: the layouts we started from`
+- Title: `A3. NVIDIA's Qwen3 recipes on H100: the layouts we started from`
 - Table, full width, numbers centred. Rows for Qwen3-32B and the
   235B-A22B pretraining row in lime text (those are the two used in the
   talk).
@@ -1250,9 +1165,46 @@ DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
 - Footer: `Source: docs/training-strategy-outline.md (NVIDIA Megatron-Bridge
   recipes). GPUs = minimum per model replica.`
 
-### A9: Limitations to state openly
+### A4: Operations (monitoring, IAM and secrets)
 
-- Title: `A9. Limitations to state openly`
+- Title: `A4. Operations: managed monitoring, and IAM and secrets fully in
+  Terraform`
+- Two columns. Left, x 0.5, w 5.9: heading `Monitoring` (14 pt bold white).
+  Right, x 6.93, w 5.9: heading `IAM and secrets` (14 pt bold white). Both
+  headings at y 1.8.
+- Left column, from y 2.25:
+  - A vertical flow of three boxes (w 5.9, h 0.45, 0.15 gaps, thin muted
+    down-arrows between them), 11 pt:
+    1. `Pod stdout + GPU metrics (DCGM receiver)`
+    2. `Observability Agent → Nebius Logging (LogQL) and the "Nebius
+       Services" Prometheus datasource (label instance_id)`
+    3. `Grafana (preinstalled), reading both`
+  - Code box below the flow (panel, Consolas 10.5 pt, w 5.9, h 1.0):
+
+```text
+{__bucket__="default", k8s_job_name=~"cluster-validator.*"} |~ "RESULT:"
+DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
+```
+
+  - Caption (10 pt muted): `GPU metrics are in "Nebius Services", not
+    "Nebius Monitoring". Limits: no alerting on LogQL-derived values;
+    14-day log retention by default (hence the Object Storage copy).`
+- Right column: table from y 2.25, w 5.9, column widths 1.9 / 4.0, 10.5 pt:
+
+| Need | How |
+|---|---|
+| GPU nodes pull the validator image | gpu-nodes-sa in a registry-readers group with viewer on the registry; no pull secret to expire |
+| MLflow reaches its bucket | mlflow-sa in a project-scoped group with editor on the project |
+| MLflow admin password | Terraform random_password stored in SecretStash; read by the training Secret, the dashboard VM and humans |
+| Validator writes to the logs bucket | Service account in an IAM group; bucket_policy grants storage.editor to the group (buckets only accept groups) |
+| S3 access key | Created with --secret-delivery-mode mystery_box, so the plaintext never appears in a terminal |
+| Dashboard exposure | Own security group: only port 80 (and 22 if a key is set) |
+
+- Footer: `Source: docs/observability.md, infra/README.md`
+
+### A5: Limitations to state openly
+
+- Title: `A5. Limitations to state openly`
 - Bullets, x 0.5, y 1.8, w 12.33, 14 pt:
   - Strategy runs use synthetic data for 20 iterations: they measure
     throughput and memory, not convergence (the end-to-end runs cover
