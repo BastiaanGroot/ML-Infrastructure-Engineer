@@ -16,7 +16,9 @@ screenshots, and 9 appendix slides for Q&A.
 
 1. Open a new Claude chat with file creation enabled.
 2. Upload this file. Optionally upload the screenshots listed in section 1.2
-   (the deck works without them; placeholders are drawn instead).
+   and the logo and icons listed in section 1.3 (the deck works without
+   them; placeholders are drawn instead of screenshots, and boxes stay
+   text-only without icons).
 3. Paste the prompt below.
 
 ### 1.1 Paste-ready prompt
@@ -39,6 +41,9 @@ from the attached brief, deck-brief.md. Follow it exactly:
 - Where the brief says SCREENSHOT PLACEHOLDER, draw the placeholder exactly as
   specified. If I uploaded a matching screenshot, place it there instead,
   scaled to fit without distortion.
+- Place the Nebius logo and the service icons from section 1.3 where the
+  brief says, if I uploaded them; otherwise follow the fallback rule in
+  section 2.5.
 - Render every slide to an image and check it against the QA checklist in
   section 7 (no overflow, no overlaps, no text below 10 pt) before giving me
   the file. Fix anything that fails.
@@ -55,12 +60,28 @@ Name the files as below so the mapping is unambiguous.
 | `shot-multinode.png` | Cross-node validator output: 16/16 IB ports ACTIVE and the `all_reduce_perf` table | E1 |
 | `shot-mlflow-runs.png` | MLflow experiment `qwen3-parallelism-experiments`, run list filtered on tag `cluster=2x8-h100-ib` | E2 |
 | `shot-mlflow-e2e-loss.png` | MLflow `e2e-q1p7b` loss chart (one continuous run across the resume) | E2 |
-| `shot-mlflow-autoresume.png` | MLflow `e2e-q1p7b-autoresume` run (one run to iteration 300 across the automatic recovery) | E2 |
 | `shot-dashboard-strategy.png` | Streamlit dashboard, strategy comparison tab | E3 |
 | `shot-dashboard-comm.png` | Streamlit dashboard, communication tab (NCCL sweeps + Nsight breakdown) | E3 |
 | `shot-dashboard-planner.png` | Streamlit dashboard, parallelism planner with the predicted-vs-measured table | E3 |
 | `shot-console-cluster.png` | Nebius console: GPU cluster on fabric-4 and the 2 x 8 H100 node group | E4 |
 | `shot-kubectl-pods.png` | Optional: `kubectl get pods -o wide` during a 2-node training job | E4 |
+
+### 1.3 Logo and icons to upload (optional)
+
+PNG or SVG with a transparent background, roughly square. Export the service
+icons from the Nebius console.
+
+| File name | What it is | Used on |
+|---|---|---|
+| `logo-nebius.png` | Nebius "N" logo, small square | Every slide (section 2.3) |
+| `icon-terraform.png` | Terraform logo | Slide 4, Terraform box |
+| `icon-k8s.png` | Nebius Managed Kubernetes icon | Slide 4, mk8s panel heading |
+| `icon-gpu-cluster.png` | Nebius GPU cluster icon (if there isn't a separate one, reuse `icon-k8s.png`) | Slide 4, GPU node group box |
+| `icon-grafana.png` | Grafana icon | Slide 4, Grafana box |
+| `icon-registry.png` | Nebius Container Registry icon | Slide 4, Container registry box |
+| `icon-mlflow.png` | Nebius Managed MLflow icon | Slide 4, Managed MLflow box |
+| `icon-vm.png` | Nebius Compute VM icon | Slide 4, Dashboard VM box |
+| `icon-bucket.png` | Nebius Object Storage bucket icon | Slide 4, Object Storage bucket box |
 
 ---
 
@@ -81,7 +102,7 @@ Name the files as below so the mapping is unambiguous.
 | Muted text | `97A1A8` | Captions, axis labels, sources, table headers |
 | Neutral series | `8C979F` | Any chart series that is neither NVLink nor InfiniBand |
 | Gridlines / tracks | `1E3547` | Chart gridlines, empty cells in diagrams |
-| Danger (non-brand) | `FF6B6B` | Only for OOM, failure, and the "node killed" event |
+| Danger (non-brand) | `FF6B6B` | Only for OOM, failure, and the "Job deleted" event on slide 9 |
 
 Colour rules:
 
@@ -115,11 +136,16 @@ Colour rules:
 
 - Slide: 13.33 x 7.5 in, margins 0.5 in on all sides.
 - Kicker: x 0.5, y 0.35, w 8.0, h 0.3.
-- Title: x 0.5, y 0.65, w 12.33, h 1.0, top-aligned.
+- Title: x 0.5, y 0.65, w 11.8, h 1.0, top-aligned (leaves room for the
+  logo at the top right).
 - Content area: x 0.5 to 12.83, y 1.8 to 6.85.
 - Footer source line: x 0.5, y 7.0, w 10.5, h 0.3, 10 pt muted, starting with
   "Source: ".
 - Slide number: x 12.0, y 7.0, w 0.83, h 0.3, right-aligned, 10 pt muted.
+- Nebius logo (`logo-nebius.png`) on every slide: x 12.43, y 0.3, 0.4 x 0.4
+  in, aligned with the kicker line. On the title slide, use a 0.6 in version
+  at x 12.13, y 0.5. To keep titles clear of the logo, the title text box is
+  w 11.8 (ending at x 12.3) instead of w 12.33.
 - Panels: rounded rectangle (`roundRect`, `rectRadius` 0.08), fill `0F2839`,
   line `22394A` 0.75 pt, inner padding 0.2 in.
 - Tables: header row fill `0F2839`, body rows no fill, a single 0.5 pt
@@ -141,6 +167,16 @@ Apply to every chart unless the slide says otherwise:
   reference line, so draw a 1 pt dashed `F3F4F5` line shape over the plot area
   at the correct value position. Fix `valAxisMinVal`/`valAxisMaxVal` so the
   position can be computed, and put a 10 pt muted label next to the line.
+- Horizontal bar charts: to put the first listed category at the top,
+  reverse the data order (pass the rows bottom to top). Don't use
+  `catAxisOrientation: 'maxMin'`; in PowerPoint it moves the value axis to
+  the top. As a result, the data sheet behind each such chart lists its rows
+  bottom to top.
+- Data labels that need a different colour or position per series (or only
+  on some points) are text boxes laid over the chart, positioned from its
+  fixed plot area, because pptxgenjs can't style labels per series. This
+  applies to slides 8, 9 and 13. If you resize or move one of those charts,
+  move its label text boxes with it.
 
 ### 2.5 Screenshot placeholders
 
@@ -148,6 +184,10 @@ A rounded rectangle, fill `0F2839`, 1 pt dashed lime `E0FF4F` border, with
 centred 12 pt muted text: `SCREENSHOT: <description>`. If the matching image
 is uploaded, place the image in the same box instead (fit, keep aspect ratio,
 centre).
+
+Fallback for the logo and icons (section 1.3): if an icon file wasn't
+uploaded, leave no gap and keep that box text-only (title not shifted). If
+the logo wasn't uploaded, omit it; don't draw a substitute.
 
 ---
 
@@ -174,32 +214,34 @@ Timing is shown per slide; the total is about 15 minutes.
   - Two node panels at x 7.4, y 1.6 and y 2.35, each w 2.3, h 0.6, panel fill.
     Inside each, 8 small lime rounded rectangles (w 0.2, h 0.36, gap 0.06),
     representing GPUs.
-  - Arrow (line with end arrowhead, 1.5 pt muted) from x 9.85, y 2.2 to
-    x 10.35, y 2.2, with label `same rules` (10 pt muted) above it.
-  - Label x 10.5, y 1.2: `Reservation: 512 H100 (64 nodes)`
+  - Arrow (line with end arrowhead, 1.5 pt muted) from x 9.8, y 2.2 to
+    x 10.2, y 2.2, with label `same rules` (10 pt muted) above it, wrapped
+    onto two lines (`same` / `rules`) so it fits between the PoC panels and
+    the grid.
+  - Label x 10.3, y 1.2: `Reservation: 512 H100 (64 nodes)`
     (12 pt secondary).
-  - A 16-column x 4-row grid of node squares starting x 10.5, y 1.6: each
-    square w 0.13, h 0.2, gap 0.03 horizontally and 0.1 vertically (grid
-    width ~2.5 in). The first row (16 squares) is lime; the other 48 are panel
-    fill with stroke.
+  - A 16-column x 4-row grid of node squares starting x 10.3, y 1.6 (so it
+    stays inside the 0.5 in right margin): each square w 0.13, h 0.2, gap
+    0.03 horizontally and 0.1 vertically (grid width ~2.5 in). The first row
+    (16 squares) is lime; the other 48 are panel fill with stroke.
   - Caption x 7.4, y 3.1, w 5.5: `Highlighted: 16 nodes = one 128-GPU
     Qwen3-235B-A22B pretraining replica` (10 pt muted).
-- Bottom strip (key numbers), panel x 0.6 to 12.73, y 4.7, h 1.0, five equal
+- Bottom strip (key numbers), panel x 0.6 to 12.73, y 4.7, h 1.0, four equal
   columns, each a key number (32 pt bold) with a 11 pt muted label:
   1. `16 H100` (white) / `2 nodes x 8, InfiniBand`
   2. `451 GB/s` (lime) / `16-GPU all-reduce, validator`
   3. `99.7%` (lime) / `weak scaling, 1 to 2 nodes`
   4. `409` (lime) / `TFLOP/s/GPU end to end (41% MFU)`
-  5. `195 s` (lime) / `automatic recovery from a lost node`
 
   Move the presenter line to y 6.3 so it sits below this strip.
 
 Speaker notes:
 
 > Open with the decision in front of them: whether to commit to 512 H100s for
-> six months. Everything that follows is evidence for that decision. The five
+> six months. Everything that follows is evidence for that decision. The four
 > numbers at the bottom are the whole talk in one line: the cluster is
-> healthy, crossing nodes is nearly free, training scales, and it heals itself.
+> healthy, crossing nodes is nearly free, and real training scales and runs
+> efficiently.
 
 ---
 
@@ -223,7 +265,7 @@ Speaker notes:
 | # | Question | Answer (key number) | Support line |
 |---|---|---|---|
 | 1 | Can we trust the cluster? | `All checks pass` (use 30 pt so it fits on one line) | 16/16 GPUs at 681-712 TFLOP/s, 451 GB/s across nodes |
-| 2 | Does real training work? | `99.7%` | weak scaling 1 to 2 nodes; loss 12.3 to 3.68; self-recovery in 195 s |
+| 2 | Does real training work? | `99.7%` | weak scaling 1 to 2 nodes; loss 12.3 to 3.68 |
 | 3 | How do we train 100B+? | `29 experiments` (30 pt) | DP, TP, PP, CP, EP, FP8, recompute, offload, profiles |
 
 - Footer: `Source: docs/ML-Infrastructure-Engineer.md (assignment)`
@@ -246,7 +288,8 @@ Speaker notes:
 - Left column bullets, x 0.5, y 1.8, w 4.4, h 4.9 (15 pt):
   - The assignment specified H200, but the 8-GPU H200 shape had no capacity;
     H100 is also the reservation GPU
-  - 2 nodes x 8 H100 SXM, 8 x 400 Gb/s NICs per node, GPUDirect RDMA
+  - 2 nodes x 8 H100 SXM: per GPU, NVLink 450 GB/s each way vs one
+    400 Gb/s (50 GB/s) InfiniBand NIC, with GPUDirect RDMA
   - fabric-4 picked because capacity advice showed the most spare H100s there
   - 2 TB shared filesystem on every node, 2 TB network disk as scratch
 - Right: topology diagram, area x 5.2 to 12.83, y 1.8 to 6.85. Native shapes:
@@ -257,7 +300,7 @@ Speaker notes:
   - Inside each node, a horizontal NVSwitch bar at y 2.25, h 0.28, spanning
     the node width minus 0.15 in padding: fill lime at 20% transparency
     (`transparency: 80`), 0.75 pt lime line, centred text
-    `NVSwitch: NVLink, ~467 GB/s bus bandwidth` (10 pt white).
+    `NVSwitch: NVLink 450 GB/s per GPU each way` (10 pt white).
   - Below the bar, 8 GPU boxes in a row (y 2.75, w 0.36, h 0.42, gap 0.07),
     lime fill, navy text `GPU0` ... `GPU7` (9 pt bold). A short 1.5 pt lime
     vertical line connects each GPU up to the NVSwitch bar.
@@ -269,8 +312,8 @@ Speaker notes:
   - From every NIC, a 1.5 pt indigo vertical line down to the fabric bar.
   - InfiniBand fabric bar across both nodes: x 5.2, y 4.55, w 7.6, h 0.4,
     indigo fill at 60% transparency with a 1 pt indigo line, centred white
-    11 pt text: `InfiniBand fabric-4: 8 x 400 Gb/s per node (16/16 ports up),
-    16-GPU all-reduce 451 GB/s`.
+    11 pt text: `InfiniBand fabric-4: 8 x 50 GB/s = 400 GB/s per node each
+    way (16/16 ports up)`.
   - Two storage panels at y 5.2, h 0.95: `Shared filesystem, 2 TB
     (virtiofs)` at x 5.2, w 4.7, with sub-line `Mounted on both nodes,
     1.2-1.7 GB/s: tokenized data, HF cache, checkpoints`; and
@@ -280,6 +323,10 @@ Speaker notes:
     one that matters).
   - Thin muted connector lines from the bottom of each node panel down to
     the shared-filesystem panel (it is mounted on both).
+  - Caption below the storage panels, x 5.2, y 6.3, w 7.6, h 0.5 (10 pt
+    muted): `NCCL bus bandwidth: 467 GB/s inside a node, 451 GB/s across 16
+    GPUs. It is normalized per GPU, not wire speed; per link, NVLink is about
+    9x a NIC.`
 - Footer: `Source: infra/README.md, cluster-validator/README.md`
 
 Speaker notes:
@@ -288,7 +335,12 @@ Speaker notes:
 > shape had no capacity, and H100 is the GPU they plan to reserve anyway.
 > Each GPU has its own 400 Gb/s NIC on the same PCIe switch, so GPUDirect
 > RDMA works. Pods run privileged with /dev/infiniband mounted, so NCCL uses
-> all eight NICs with no socket fallback.
+> all eight NICs with no socket fallback. If someone asks why 451 GB/s across
+> nodes is so close to NVLink's 467: per GPU, NVLink (450 GB/s each way) is
+> about nine times its NIC (50 GB/s), but eight NICs give a node 400 GB/s,
+> and NCCL's bus bandwidth is a per-GPU, algorithm-normalized figure rather
+> than wire speed. The real gap shows on a single link and with small
+> messages, which is why tensor parallelism stays inside a node (slide 8).
 
 ---
 
@@ -305,7 +357,18 @@ Speaker notes:
     drift-free against the live project
 - Diagram, area x 0.5 to 12.83, y 3.05 to 6.85. Native shapes (box titles
   11 pt bold white, sub-lines 9-10 pt muted, all boxes panel fill + stroke
-  unless noted):
+  unless noted).
+- Icons (section 1.3): a 0.3 x 0.3 in icon at the left of the box title,
+  vertically centred on the title line, 0.08 in from the box's left edge;
+  the title and sub-line shift right by 0.38 in. Icons go on: Terraform
+  (`icon-terraform.png`), the mk8s panel heading (`icon-k8s.png`), the GPU
+  node group box (`icon-gpu-cluster.png`), Grafana (`icon-grafana.png`),
+  Container registry (`icon-registry.png`), Managed MLflow
+  (`icon-mlflow.png`), Dashboard VM (`icon-vm.png`) and Object Storage
+  bucket (`icon-bucket.png`). SecretStash, IAM, Nebius Logging, Nebius
+  Monitoring, the Observability Agent and both storage boxes stay
+  text-only. Missing icon files: see the fallback in section 2.5.
+- Boxes:
   - `Terraform` box, x 0.5, y 4.4, w 1.5, h 0.9, sub-line `infra/ · saved
     plan, apply`. Arrow (1.5 pt muted, arrowhead) to the project boundary at
     x 2.3.
@@ -324,8 +387,8 @@ Speaker notes:
   - Below mk8s, still in the VPC, two storage boxes, y 5.15, h 0.6, w 2.9:
     `Shared filesystem 2 TB` / `data, HF cache, checkpoints` (x 2.7, 1 pt
     lime outline) and `Network disk 2 TB` / `per-job scratch PVC` (x 5.7).
-  - Right column of managed services, x 9.1, w 3.55, each h 0.52, stacked
-    from y 3.4 with 0.08 gaps:
+  - Right column of managed services, x 9.1, w 3.55, each h 0.48, stacked
+    from y 3.4 with 0.08 gaps (so all six fit inside the project boundary):
     1. `Container registry` / `validator v9, pulled by node SA`
     2. `Managed MLflow` / `all runs, public + basic auth`
     3. `Dashboard VM` / `Streamlit over MLflow`
@@ -336,10 +399,11 @@ Speaker notes:
   - Bottom row inside the project, below the VPC, y 6.0, h 0.5:
     `Nebius Logging` / `pod stdout, LogQL` (x 2.5, w 3.0) and
     `Nebius Monitoring` / `DCGM GPU metrics, PromQL` (x 5.65, w 3.15).
-  - Thin muted arrows: Observability Agent down to Logging and to
-    Monitoring; Grafana box has a 10 pt muted note to its right or in the
-    footer: `Agent ships logs and GPU metrics to Logging and Monitoring;
-    Grafana reads both.`
+  - Thin muted arrows from the Observability Agent down to Logging and to
+    Monitoring, routed through the gap between the two storage boxes.
+  - Under the Terraform box (x 0.5, y 5.4, w 1.6), a 10 pt muted note:
+    `Agent ships logs and GPU metrics to Logging and Monitoring; Grafana
+    reads both.`
 - Footer: `Source: infra/README.md, docs/observability.md`
 
 Speaker notes:
@@ -364,7 +428,7 @@ Speaker notes:
 
 | Area | Choice | Why | Alternative considered |
 |---|---|---|---|
-| Scheduler | Plain Kubernetes Indexed Jobs | One pod per node, torchrun rendezvous via a headless Service; Job retries give automatic recovery | Slurm / Soperator, Kubeflow training operator, MPI Operator |
+| Scheduler | Plain Kubernetes Indexed Jobs | One pod per node, torchrun rendezvous via a headless Service; no extra operator to install | Slurm / Soperator, Kubeflow training operator, MPI Operator |
 | Framework | NeMo Megatron-Bridge (Megatron-Core) | TP, PP, CP and EP are first-class config fields, as 100B+ runs need | FSDP2 / DeepSpeed ZeRO: shards memory, but can't split layers or experts |
 | Model | Qwen3, dense 0.6B-32B + MoE 30B-A3B / 235B-A22B | Apache-2.0, NVIDIA recipes, one family covering every strategy plus a real >100B target | Mixing model families across experiments |
 | Storage | Shared FS for shared data, network disk as scratch | Shared FS is 5-8x faster and mounted on every node | Everything on the network disk (not shared, slower) |
@@ -516,9 +580,10 @@ Speaker notes:
     | 16 GPUs, NVLink + IB | `614EFA` | 22.6 | 158.1 | 381.4 | 442.4 |
     | 2 GPUs, one NIC | `8C979F` | 16.9 | 38.6 | 45.3 | 46.3 |
 
-  - Data labels on the first two series only (`0.0`, lime series above,
+  - Value labels on the first two series only (`0.0`, lime series above,
     indigo series below); none on the one-NIC series (its values are in the
-    bullets).
+    bullets). These are text boxes over the chart, not chart data labels
+    (section 2.4).
   - Value axis 0-500, major unit 100, title `Bus bandwidth (GB/s)`.
     Category axis title `Message size`. Legend top.
 - Right bottom: compact table, x 4.7, y 5.3, w 8.13, h 1.5, 11 pt, numbers
@@ -547,77 +612,61 @@ Speaker notes:
 ### Slide 9: End-to-end run (1.5 min)
 
 - Kicker: `END-TO-END RUN`
-- Title: `Real training works end to end, and recovers from a lost node on
-  its own`
+- Title: `Real training works end to end, and resumes cleanly from its last
+  checkpoint`
 - Bullets, x 0.5, y 1.75, w 12.33, h 1.45 (13.5 pt, four lines):
   - Qwen3-1.7B from scratch on FineWeb-Edu, DP16 across both nodes, about one
     epoch of 1.05B tokens: 409 TFLOP/s/GPU, 41% MFU
   - Data tokenized once onto the shared filesystem; checkpoints every 250
     iterations cost under 1% of the run
-  - Manual resume: relaunch picks up the last checkpoint in 65 s. Automatic:
-    a killed pod is replaced and training resumes in 195 s, no human
-  - Replayed iterations give identical losses both times, so data order and
-    optimizer state restore exactly
-- Left: native line chart, x 0.5, y 3.3, w 5.2, h 2.55.
+  - Stopped mid-run and relaunched, it picks up the last checkpoint and is
+    training again in 65 s, in the same MLflow run
+  - Replayed iterations give identical losses, so data order and optimizer
+    state restore exactly
+- Left: native line chart, x 0.5, y 3.3, w 6.0, h 2.55.
   - Title (text box, 12 pt bold white): `Qwen3-1.7B training loss`
   - Categories (iterations): `1`, `50`, `100`, `250`, `500`, `750`, `1000`.
   - One series `Training loss`, lime `E0FF4F`, line width 2.5, markers:
     12.32, 7.27, 6.53, 5.35, 4.24, 3.86, 3.68.
-  - Data labels on first and last points only if possible (12.32, 3.68);
-    otherwise all points, format `0.00`.
+  - Labels on the first and last points only (12.32, 3.68), as text boxes
+    over the chart (section 2.4).
   - Value axis 0-14, major unit 2, title `Loss`. Category axis title
     `Iteration (unevenly spaced)`. No legend.
-- Right top: manual-resume timeline, native shapes, area x 6.0 to 12.83,
-  y 3.3 to 4.55.
-  - Label top-left (11 pt bold white): `Manual resume (1000-iteration run)`.
-  - Horizontal 2 pt muted line at y 4.05 from x 6.2 (iteration 0) to x 12.6
-    (iteration 1000); x position = 6.2 + iteration x 0.0064.
+- Right: checkpoint-resume timeline, native shapes, area x 6.8 to 12.83,
+  y 3.3 to 5.85.
+  - Label top-left (11 pt bold white): `Checkpoint and resume (1000-iteration
+    run)`.
+  - Horizontal 2 pt muted line at y 4.75 from x 7.0 (iteration 0) to x 12.6
+    (iteration 1000); x position = 7.0 + iteration x 0.0056.
   - Diamonds (rotated squares, 0.14 in) at iterations 0 (muted), 250, 500,
-    750, 1000 (lime), with labels below (10 pt secondary): `start`,
+    750, 1000 (lime), with labels below at y 4.9 (10 pt secondary): `start`,
     `ckpt 250`, `ckpt 500`, `ckpt 750`, `ckpt 1000`.
-  - Red `FF6B6B` vertical tick at iteration 519 (x ≈ 9.52), label below it in
-    red: `Job deleted at 519`.
-  - Curved lime arrow from the 519 tick back to iteration 501 (x ≈ 9.41),
-    arcing above the line; label above (10 pt white):
+  - Red `FF6B6B` vertical tick at iteration 519 (x ≈ 9.91). Its red label
+    sits one row lower than the checkpoint labels (y 5.25), so it doesn't
+    collide with `ckpt 500`: `Job deleted at 519`.
+  - A small lime return hook (up from the 519 tick, left, and down with an
+    arrowhead) back to iteration 501 (x ≈ 9.81), above the line; label
+    above it at y 3.85 (10 pt white, may wrap to two lines):
     `relaunched: training at 501 after 65 s; 501-519 losses identical`.
-- Right middle: automatic-recovery timeline, area x 6.0 to 12.83, y 4.65 to
-  5.85.
-  - Label (11 pt bold white): `Automatic recovery (e2e-q1p7b-autoresume, no
-    human involved)`.
-  - Horizontal 2 pt muted line at y 5.25 from x 6.2 (t = 0 s) to x 12.6
-    (t = 200 s); x = 6.2 + t x 0.032.
-  - Event dots (0.12 in circles) with short leader lines, labels alternating
-    above and below so none overlap (10 pt):
-
-    | t (s) | Label | Colour | Label position |
-    |---|---|---|---|
-    | 0 | pod with last rank killed (iter 222) | `FF6B6B` | above, high |
-    | 15 | +15 s replacement pod | `D5D8DB` | below |
-    | 19 | +19 s survivor stops workers | `D5D8DB` | above, low |
-    | 86 | +86 s rendezvous timeout, pods exit | `D5D8DB` | below, lower |
-    | 129 | +129 s Job recreates both pods | `D5D8DB` | above, low |
-    | 195 | +195 s training again | `E0FF4F` | below, right-aligned to the dot |
-
+  - Under the timeline at y 5.55 (10 pt muted): `Checkpoints: 22.4 GB, ~17 s
+    each, to the shared filesystem`.
 - Bottom: four key-number panels, y 5.95, h 0.85, w 2.95 each, at x 0.5,
   3.63, 6.76, 9.89 (32 pt bold number, 10.5 pt muted label beside or below):
   1. `1.88 s` (white) / `steady step time`
   2. `409` (lime) / `TFLOP/s per GPU (41% MFU)`
   3. `558k` (white) / `tokens/s, whole cluster`
-  4. `195 s` (lime) / `kill to training, automatic`
-- Footer: `Source: training/README.md, MLflow runs e2e-q1p7b and
-  e2e-q1p7b-autoresume. The 1000-iteration run logged 2.09 s / 368 TFLOP/s
-  due to a since-fixed blocking MLflow call; 1.88 s / 409 is the same config.`
+  4. `65 s` (lime) / `relaunch to training, from the last checkpoint`
+- Footer: `Source: training/README.md, MLflow e2e-q1p7b; throughput is the
+  steady state of the same config with asynchronous logging.`
 
 Speaker notes:
 
-> This is their daily loop: shared data, cheap checkpoints and self-healing
-> Jobs. The loss drops from 12.3 to 3.7 over one epoch. We deleted the Job at
-> iteration 519 and relaunched: it was training again from checkpoint 500 in
-> 65 seconds, with identical losses. Then we killed a pod mid-run with no human
-> involved: the Job and torchrun's elastic rendezvous brought it back in
-> 195 seconds. An earlier attempt with a static rendezvous hung for 18 minutes
-> in NCCL, which is why the elastic mode matters. Honest caveat: recovery goes
-> through a Job retry after the rendezvous times out.
+> This is their daily loop: data tokenized once onto the shared filesystem,
+> cheap checkpoints, and runs that pick up where they left off. The loss drops
+> from 12.3 to 3.7 over one epoch, at 409 TFLOP/s per GPU. We deleted the Job
+> at iteration 519 and relaunched it: it was training again from checkpoint
+> 500 in 65 seconds, in the same MLflow run, and the replayed iterations gave
+> identical losses. So an interruption costs minutes, not the run.
 
 ---
 
@@ -671,42 +720,66 @@ Speaker notes:
 - Kicker: `QWEN3-8B EXPERIMENTS`
 - Title: `Scale out with data parallelism; use the smallest tensor-parallel
   degree that fits`
-- No bullet block on the slide (the four key numbers carry the message;
-  bullets are in the speaker notes).
-- Two native horizontal bar charts side by side, sharing the same category
-  order so each row lines up. Both at y 1.8, h 4.0. Category order top to
-  bottom as listed below (in pptxgenjs horizontal bar charts, set
-  `catAxisOrientation: 'maxMin'` so the first category is at the top).
-  - Left chart, x 0.5, w 7.4, title `TFLOP/s per GPU (steady state)`, lime
-    bars `E0FF4F`, except the `TP2 x DP4, one node` bar in indigo `614EFA`
-    (it is the 1-node comparison point). Category labels 10.5 pt secondary.
-    Value axis 0-500, major unit 100. Data labels `0.0`. Dashed reference
-    line at 415.3 labelled `baseline 415.3`.
-  - Right chart, x 8.1, w 4.73, title `Peak GPU memory (GB, max over
-    ranks)`, neutral bars `8C979F`, no category labels (they align with the
-    left chart). Value axis 0-90, major unit 20. Data labels `0.0`. Dashed
-    reference line at 80 labelled `80 GB capacity`.
+- No bullet block on the slide; the three panel answers and the four key
+  numbers carry the message.
+- One-line intro, x 0.5, y 1.75, w 12.33, h 0.4 (13 pt secondary):
+  `Same model, same 80 GB GPU. Each bar changes one thing from the TP2 x DP8
+  baseline, the fastest layout that fits. Labels: layout · peak memory per
+  GPU.`
+- Three panels, one question each: y 2.2, h 3.75, w 3.93, at x 0.5, 4.7
+  and 8.9. Inside each panel, top to bottom:
+  - Question heading (13 pt bold white), panel top + 0.15.
+  - One native horizontal bar chart of TFLOP/s per GPU, panel top + 0.55,
+    w 3.65 (category labels 10 pt secondary, may wrap to two lines; value
+    axis 0-500 with gridlines every 100 and axis labels hidden; data labels
+    `0.0` at the bar end, white). Keep bar thickness the same in all three
+    panels: chart h 2.3 for five bars, h 1.0 for two bars. List order is top
+    to bottom; reverse the data as described in section 2.4. Per-bar colours
+    as on slide 7.
+  - Panels 1 and 2: dashed reference line at 415.3, labelled `baseline`.
+  - A red `FF6B6B` OOM line or a muted footnote (10.5 pt), panel top + 2.95.
+  - The answer line (12 pt bold lime), panel top + 3.25.
 
-| Category (top to bottom) | TFLOP/s/GPU | Peak memory (GB) |
+**Panel 1, heading `Which split? (seq 4k)`**
+
+| Bar (top to bottom) | TFLOP/s/GPU | Colour |
 |---|---|---|
-| TP2 x DP8 (baseline) | 415.3 | 49.2 |
-| TP2 x DP4, one node | 416.6 | 55.3 |
-| DP16 + full recompute | 368.2* | 65.5 |
-| TP4 x DP4 | 311.0 | 30.2 |
-| TP8 x DP2 | 162.0 | 20.7 |
-| TP8, one node | 165.5 | 26.8 |
-| TP8 split 4 + 4 | 159.5 | 26.8 |
-| TP2 x PP2 x DP4 | 350.1 | 33.2 |
-| FP8 (current scaling) | 426.6 | 47.2 |
-| Unfused attention | 309.0 | 69.4 |
-| Activation CPU offload | 126.9 | 40.5 |
-| TP2 x CP2 x DP4, seq 16k | 439.8 | 66.7 |
-| TP4 x DP4, seq 16k | 411.8 | 63.8 |
+| TP2 x DP8 (baseline) · 49 GB | 415.3 | lime `E0FF4F` |
+| TP2 x DP4, one node · 55 GB | 416.6 | indigo `614EFA` |
+| TP2 x PP2 x DP4 · 33 GB | 350.1 | lime |
+| TP4 x DP4 · 30 GB | 311.0 | lime |
+| TP8 x DP2 · 21 GB | 162.0 | lime |
 
-- OOM callout, below the charts, x 0.5, y 5.85, w 12.33, h 0.3, 10.5 pt:
-  red `FF6B6B` text `OOM (> 80 GB): DP16 without recompute; TP2 x DP8 at seq
-  16k.` followed by muted text `*Recompute counts the extra forward pass.`
-- Bottom: four key-number panels, y 6.2, h 0.65, w 2.95 each, at x 0.5,
+- Red line: `DP16 (no TP): OOM`
+- Answer: `Smallest TP that fits; scale out with DP (99.7%)`
+
+**Panel 2, heading `Which optimizations?`**
+
+| Bar (top to bottom) | TFLOP/s/GPU | Colour |
+|---|---|---|
+| FP8 · 47 GB | 426.6 | lime |
+| Baseline · 49 GB | 415.3 | neutral `8C979F` (reference) |
+| DP16 + recompute · 66 GB | 368.2* | lime |
+| Unfused attention · 69 GB | 309.0 | lime |
+| CPU offload · 41 GB | 126.9 | lime |
+
+- Muted footnote: `*Recompute counts the extra forward pass`
+- Answer: `Only FP8 helps (+2%); keep fused attention`
+
+**Panel 3, heading `Long context? (seq 16k)`**
+
+| Bar (top to bottom) | TFLOP/s/GPU | Colour |
+|---|---|---|
+| TP2 x CP2 x DP4 · 67 GB | 439.8 | lime |
+| TP4 x DP4 · 64 GB | 411.8 | lime |
+
+- Red line: `TP2 x DP8: OOM`
+- Answer: `CP2 is 7% faster than TP4`
+
+The two TP8 node-placement runs (TP8 within one node, TP8 split 4 + 4) are
+not on this slide; they are on slide 13 and in A1.
+
+- Bottom: four key-number panels, y 6.05, h 0.75, w 2.95 each, at x 0.5,
   3.63, 6.76, 9.89. Number 26 pt bold, label 10.5 pt muted to its right:
   1. `99.7%` (lime) / `weak scaling, 1 node (indigo) to 2 nodes`
   2. `-61%` (white) / `TP2 to TP8 throughput`
@@ -717,15 +790,19 @@ Speaker notes:
 
 Speaker notes:
 
-> One change at a time from a TP2 x DP8 baseline. Adding the second node over
-> InfiniBand scales at 99.7% (416.6 to 415.3 TFLOP/s per GPU at the same
-> per-GPU work). Going from TP2 to TP8 loses 61%; TP8 split across nodes is
-> within 4% of TP8 in one node, because TP8 is already communication-bound.
-> At 16k sequence length, CP2 fits and is 7% faster than TP4. FP8 is only 2%
-> faster, because only the GEMMs run in FP8. Unfused attention needs 41% more
-> memory, and CPU offload makes the step 3.3x slower. The memory column
-> explains why each layout exists: TP, PP and recompute trade throughput for
-> memory. 99.7% is the number to extrapolate from for 512 GPUs.
+> Read every bar as a trade-off: how fast the layout trains, and how much of
+> the 80 GB it needs. Splitting the model with TP or PP lowers memory per GPU
+> but adds communication; DP copies the model and costs almost nothing. The
+> baseline is TP2 x DP8 because it's the fastest layout that fits: without
+> TP, DP16 runs out of memory, and NVIDIA's TP4 recipe is 25% slower here.
+> Panel 1: the second node over InfiniBand scales at 99.7% (416.6 to 415.3
+> TFLOP/s per GPU at the same per-GPU work), while TP2 to TP8 loses 61%.
+> Panel 2: FP8 is only 2% faster because only the GEMMs run in FP8;
+> recompute makes DP16 fit, with a 13% longer step than the baseline;
+> unfused attention gives 26% less throughput and needs 41% more memory; CPU
+> offload makes the step 3.3x slower. Panel 3:
+> at 16k tokens the baseline doesn't fit, and CP2 is 7% faster than TP4.
+> 99.7% is the number to extrapolate from for 512 GPUs.
 
 ---
 
@@ -780,6 +857,8 @@ Speaker notes:
   - TP2 on NVLink: GEMMs are 47% of kernel time
   - TP8 across nodes: NCCL is 63%, GEMMs 19%
   - Each TP all-reduce takes ~4x longer, and there are 747k of them
+  - TP8 split across two nodes runs within 4% of TP8 inside one node: TP8
+    is already communication-bound
 - Right top: native 100% stacked horizontal bar chart
   (`barDir: 'bar'`, `barGrouping: 'percentStacked'`), x 4.8, y 1.8, w 8.03,
   h 3.0.
@@ -794,11 +873,10 @@ Speaker notes:
     | NCCL communication | `614EFA` | 26.1 | 63.4 |
     | Attention + everything else | `8C979F` | 26.9 | 17.6 |
 
-  - Data labels centred in the segments (`dataLabelPosition: 'ctr'`, never
-    `outEnd` for stacked charts), format `0"%"`. Label colour navy
-    `001A2B` on the lime and neutral segments and white on the indigo
-    segment. If per-series label colours aren't possible, use white and make
-    sure the lime-segment labels are still readable, or add text boxes.
+  - Segment percentages centred in each segment, format `47%`: navy
+    `001A2B` text on the lime and grey segments, white on the indigo
+    segment. These are text boxes over the chart, positioned from its fixed
+    plot area, not chart data labels (section 2.4).
   - Legend at the bottom. Value axis hidden or 0-100%.
 - Right bottom: three key-number panels, y 5.05, h 1.4, w 2.55 each, at
   x 4.8, 7.54, 10.28:
@@ -825,8 +903,9 @@ Speaker notes:
 - Kicker: `SCALE-OUT PLAN`
 - Title: `On 512 H100s, the same rules give a 235B MoE pretraining run with
   4x data parallelism`
-- Left column, x 0.5, y 1.8, w 4.2: three rule panels, each h 1.05, gap 0.12,
-  stacked from y 1.8. Inside each: `RULE 1` / `2` / `3` (11 pt bold lime)
+- Left column, x 0.5, y 1.8, w 4.2: three rule panels, gap 0.12, stacked
+  from y 1.8. Rules 1 and 2 are h 1.0; rule 3 is h 1.3 because its text
+  needs three lines. Inside each: `RULE 1` / `2` / `3` (11 pt bold lime)
   and the rule (14 pt white):
   1. `TP, CP and EP stay inside a node, on NVLink`
   2. `PP crosses nodes, point-to-point over InfiniBand`
@@ -849,8 +928,9 @@ Speaker notes:
     16 nodes = 128 GPUs (NVIDIA recipe: TP4, PP16, CP2, EP8); 4 replicas give
     DP4 over all 512 GPUs. Conceptual: Megatron's rank order interleaves DP
     and PP nodes, both over InfiniBand.`
-- Right bottom: dimension table, x 5.0, y 4.95, w 7.83, h 1.85, 11 pt.
-  Rows 1-3 "Link" text lime, rows 4-5 indigo.
+- Right bottom: dimension table, x 5.0, y 4.95, w 7.83, h 1.85, 10.5 pt (so
+  the long Data/InfiniBand row stays on one line). Rows 1-3 "Link" text
+  lime, rows 4-5 indigo.
 
 | Dimension | Degree | Spans | Link |
 |---|---|---|---|
@@ -913,8 +993,6 @@ Speaker notes:
     nodes, before any training
   - Export the final checkpoint to Hugging Face format (Megatron-Bridge
     AutoBridge) and serve it
-  - Raise torchrun rendezvous timeouts or move to JobSet, so recovery doesn't
-    need a Job retry
   - Emit validator thresholds as metrics so bandwidth regressions can alert
   - Add auth and TLS to the results dashboard; consider managed Soperator
     once several teams share the GPUs
@@ -957,12 +1035,10 @@ uploaded, draw the placeholder (section 2.5).
 - Title: `Every run is tracked in MLflow, including across restarts`
 - Placeholder left, x 0.5, y 1.8, w 6.05, h 5.0: `SCREENSHOT: MLflow run
   list, tag cluster=2x8-h100-ib` (`shot-mlflow-runs.png`).
-- Two stacked placeholders right, x 6.78, w 6.05, h 2.4, at y 1.8 and 4.4:
-  `SCREENSHOT: e2e-q1p7b loss chart` (`shot-mlflow-e2e-loss.png`) and
-  `SCREENSHOT: e2e-q1p7b-autoresume run to iteration 300`
-  (`shot-mlflow-autoresume.png`).
-- Notes: `One MLflow run survives both the manual resume and the automatic
-  recovery, so the loss curve is continuous.`
+- Placeholder right, x 6.78, y 1.8, w 6.05, h 5.0: `SCREENSHOT: e2e-q1p7b
+  loss chart` (`shot-mlflow-e2e-loss.png`).
+- Notes: `One MLflow run survives the resume, so the loss curve is
+  continuous.`
 
 ### E3: Results dashboard
 
@@ -1167,8 +1243,6 @@ DCGM_FI_DEV_GPU_TEMP{instance_id="<node>"}
   - Everything is measured at 16 GPUs; the 512-GPU layout is extrapolated
     from NVIDIA's recipes, the placement rules and the 99.7% two-node
     scaling.
-  - Automatic recovery works through a Job-level retry after the elastic
-    rendezvous times out, not a pure in-agent restart.
   - Nsight profiles and NCCL sweeps are from the first round (code paths
     unchanged); CPU offload varied between host VMs (7.87 s vs 6.33 s).
   - Pods run privileged with /dev/infiniband mounted, so each pod claims its
@@ -1209,20 +1283,17 @@ to double-check any value.
 | 256 MiB | 424.4 | 381.4 | 45.3 |
 | 1 GiB | 468.0 | 442.4 | 46.3 |
 
-### 6.3 End-to-end training (`training/README.md`, MLflow `e2e-q1p7b`, `e2e-q1p7b-autoresume`)
+### 6.3 End-to-end training (`training/README.md`, MLflow `e2e-q1p7b`)
 
 | Metric | Value |
 |---|---|
 | Model / data | Qwen3-1.7B from scratch, FineWeb-Edu, 1.49B tokens prepared (5.6 GB, 5 min), 1.05B trained |
 | Layout | DP16, 2 nodes, 256 x 4096 tokens per step, 1000 iterations |
 | Loss | 12.32 (1), 7.27 (50), 6.53 (100), 5.35 (250), 4.24 (500), 3.86 (750), 3.68 (1000) |
-| Throughput | 1.88 s per step, 409 TFLOP/s/GPU, 41% MFU, 34.9k tokens/s/GPU, 558k tokens/s cluster, 44.3 GB peak |
-| Original 1000-iteration run | 2.09 s / 368 TFLOP/s (blocking MLflow call per step, since fixed) |
+| Throughput | 1.88 s per step, 409 TFLOP/s/GPU, 41% MFU, 34.9k tokens/s/GPU, 558k tokens/s cluster, 44.3 GB peak (steady state of the same config with asynchronous logging, measured in the later `e2e-q1p7b-autoresume` run) |
+| Original 1000-iteration run (Q&A only) | Logged 2.09 s / 368 TFLOP/s because of a blocking MLflow call per step, since fixed |
 | Checkpoints | 22.4 GB, ~17 s each, every 250 iterations, shared filesystem |
 | Manual resume | Job deleted at 519, training at 501 after 65 s, losses 501-519 identical (4.231, 4.169) |
-| Automatic recovery | 300 iterations, checkpoint every 100, pod killed at 222: +15 s replacement pod, +19 s survivor stops workers, +86 s rendezvous timeout, +129 s both pods recreated, +195 s training again (at iteration 204) from checkpoint 200; iterations 201-222 replayed with identical losses (5.782 at 201, 5.664 at 222) |
-| Mechanism | Job backoffLimit 6 + torchrun elastic c10d rendezvous; static rendezvous hung 18 min and failed after 7 failures |
-
 ### 6.4 Strategy experiments (`training/README.md`)
 
 - Qwen3-8B: see A1. Derived: weak scaling 415.3 / 416.6 = 99.7%; TP2 to TP8
@@ -1258,21 +1329,25 @@ to double-check any value.
       the edges; 0.5 in margins respected.
 - [ ] No text smaller than 10 pt (9 pt only in the diagram labels that say
       so).
-- [ ] No overlapping elements: timeline labels on slide 9, chart labels on
-      slides 8 and 11, and diagram connectors on slides 4 and 6.
+- [ ] No overlapping elements: resume-timeline labels on slide 9, chart
+      labels on slides 8 and 11, and diagram connectors on slides 4 and 6.
 - [ ] Charts are native and editable (not images), with the specified data,
       colours, axis ranges and axis titles.
 - [ ] Colour key holds everywhere: lime = inside a node / key number,
-      indigo = across nodes, red only for OOM / failure / kill.
+      indigo = across nodes, red only for OOM / failure / Job deleted.
 - [ ] Text on lime fills is navy, not white.
 - [ ] Reference lines (400 GB/s, 600 TFLOP/s, 415.3 baseline, 80 GB) sit at
       the right value on their axis.
-- [ ] Slide 11's two charts line up row by row (same category order and
-      height).
+- [ ] Slide 11's three panels have the same bar thickness and axis range
+      (0-500), and every bar label shows its peak memory.
 - [ ] No accent bars, stripes, gradients, shadows, emoji or stock images.
 - [ ] Every core slide has speaker notes; every slide with data has a source
       footer.
 - [ ] Screenshot placeholders use the dashed-lime style and the exact
       labels, or the uploaded image scaled without distortion.
+- [ ] If uploaded, the Nebius logo is on every slide at the top right and
+      doesn't overlap the title or kicker.
+- [ ] Slide 4 icons are square (not stretched), the same size, and aligned
+      with their box titles; boxes without an icon file are text-only.
 - [ ] Spot-check numbers against section 6: 451.5 GB/s, 99.7%, 409 TFLOP/s,
-      41% MFU, 195 s, 681-712 TFLOP/s, 29 experiments.
+      41% MFU, 65 s, 681-712 TFLOP/s, 29 experiments.
